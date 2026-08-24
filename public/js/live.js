@@ -275,7 +275,7 @@ map.on('load', async () => {
     // Clicking empty map background (i.e. not an airport or an aircraft)
     // clears the current selection/links.
     map.on('click', (e) => {
-        const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'live-flights-symbols'] });
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'airports-labels', 'live-flights-symbols'] });
         if (hits.length === 0) {
             clearSelection();
         }

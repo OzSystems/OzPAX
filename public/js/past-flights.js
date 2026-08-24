@@ -123,7 +123,7 @@ map.on('load', async () => {
     // Clicking empty map background (i.e. not an airport or a route line)
     // clears the current highlight/selection.
     map.on('click', (e) => {
-        const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'routes-lines'] });
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'airports-labels', 'routes-lines'] });
         if (hits.length === 0) {
             clearSelection();
         }

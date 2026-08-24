@@ -86,7 +86,31 @@ export function addAirportsLayer(map, { onClick, radiusStops, radiusExpression, 
         },
     });
 
-    map.on('click', 'airports-circles', (e) => {
+    map.addLayer({
+        id: 'airports-labels',
+        type: 'symbol',
+        source: 'airports',
+        layout: {
+            'text-field': ['get', 'icao'],
+            'text-size': 11,
+            'text-offset': [0, 1.4],
+            'text-anchor': 'top',
+            'text-allow-overlap': false,
+            'text-optional': true,
+            // When icons overlap at low zoom, only the busiest airport's
+            // label wins the shared space - lower sort key placed first.
+            'symbol-sort-key': ['-', 0, ['get', 'total']],
+        },
+        paint: {
+            'text-color': '#e2e8f0',
+            'text-halo-color': '#0c2a43',
+            'text-halo-width': 1.2,
+        },
+    });
+
+    const interactiveLayers = ['airports-circles', 'airports-labels'];
+
+    map.on('click', interactiveLayers, (e) => {
         const feature = e.features[0];
 
         new mapboxgl.Popup()
@@ -97,6 +121,6 @@ export function addAirportsLayer(map, { onClick, radiusStops, radiusExpression, 
         onClick?.(feature);
     });
 
-    map.on('mouseenter', 'airports-circles', () => (map.getCanvas().style.cursor = 'pointer'));
-    map.on('mouseleave', 'airports-circles', () => (map.getCanvas().style.cursor = ''));
+    map.on('mouseenter', interactiveLayers, () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', interactiveLayers, () => (map.getCanvas().style.cursor = ''));
 }
