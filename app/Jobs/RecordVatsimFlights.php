@@ -133,7 +133,7 @@ class RecordVatsimFlights implements ShouldQueue
             // never witnessed the actual departure, so departed_at stays null
             // rather than being backfilled to "now".
             $session->status = $isAirborneNow ? 'airborne' : 'on_ground';
-            $session->departed_on_ground = ! $isAirborneNow
+            $session->connected_on_ground = ! $isAirborneNow
                 && $dep !== null
                 && isset($airportRecords[$dep])
                 && $this->distanceNm(
@@ -261,7 +261,7 @@ class RecordVatsimFlights implements ShouldQueue
                 'original_arr' => $session->arr,
                 'aircraft_icao' => $session->aircraft_icao,
                 'departed_at' => $session->departed_at,
-                'departed_on_ground' => $session->departed_on_ground,
+                'connected_on_ground' => $session->connected_on_ground,
                 'landed_at' => $landedAt,
             ]
         );

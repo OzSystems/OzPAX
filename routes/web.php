@@ -14,6 +14,8 @@ Route::get('/flights/live', [MapController::class, 'live'])->name('live');
 Route::get('/flights/live/flights', [MapController::class, 'liveFlights'])->name('live.flights');
 Route::get('/flights/live/airports', [MapController::class, 'liveAirports'])->name('live.airports');
 
+Route::get('/flights/fir-boundaries', [MapController::class, 'firBoundaries'])->name('fir-boundaries');
+
 Route::get('/flights/past', [MapController::class, 'pastFlights'])->name('past-flights');
 Route::get('/flights/past/airports', [MapController::class, 'pastAirports'])->name('past-flights.airports');
 Route::get('/flights/past/routes', [MapController::class, 'pastRoutes'])->name('past-flights.routes');

@@ -1,4 +1,4 @@
-import { createMap, emptyCollection, addAirportsLayer, fetchJson, refreshSource } from './map-base.js';
+import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, refreshSource } from './map-base.js';
 
 const PAST_AIRPORTS_URL = '/flights/past/airports';
 const PAST_ROUTES_URL = '/flights/past/routes';
@@ -63,6 +63,8 @@ function routePopupHtml(p) {
 }
 
 map.on('load', async () => {
+    addFirBoundariesLayer(map);
+
     addAirportsLayer(map, { onClick: (feature) => selectAirport(feature.properties.icao) });
 
     map.addSource('routes', { type: 'geojson', data: emptyCollection() });

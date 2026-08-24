@@ -21,7 +21,7 @@ class FlightSession extends Model
         'relevant',
         'status',
         'departed_at',
-        'departed_on_ground',
+        'connected_on_ground',
         'last_seen_at',
     ];
 
@@ -31,7 +31,7 @@ class FlightSession extends Model
         'lon' => 'decimal:6',
         'relevant' => 'boolean',
         'departed_at' => 'datetime',
-        'departed_on_ground' => 'boolean',
+        'connected_on_ground' => 'boolean',
         'last_seen_at' => 'datetime',
     ];
 }

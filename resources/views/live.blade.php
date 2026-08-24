@@ -21,10 +21,37 @@
                 position: fixed;
                 inset: 0;
             }
+
+            #controls {
+                position: fixed;
+                top: 12px;
+                left: 12px;
+                z-index: 1;
+                background: rgba(15, 23, 42, 0.85);
+                color: #e2e8f0;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font: 13px system-ui, sans-serif;
+            }
+
+            #controls label {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                cursor: pointer;
+                white-space: nowrap;
+            }
         </style>
     </head>
     <body>
         <div id="map"></div>
+
+        <div id="controls">
+            <label>
+                <input type="checkbox" id="hide-ungrounded">
+                Hide Aircraft that will not count towards data (did not connect on ground)
+            </label>
+        </div>
 
         <script type="module" src="{{ asset('js/live.js') }}"></script>
     </body>

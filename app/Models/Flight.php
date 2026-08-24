@@ -16,14 +16,14 @@ class Flight extends Model
         'aircraft_icao',
         'logon_time',
         'departed_at',
-        'departed_on_ground',
+        'connected_on_ground',
         'landed_at',
     ];
 
     protected $casts = [
         'logon_time' => 'datetime',
         'departed_at' => 'datetime',
-        'departed_on_ground' => 'boolean',
+        'connected_on_ground' => 'boolean',
         'landed_at' => 'datetime',
     ];
 }

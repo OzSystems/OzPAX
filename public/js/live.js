@@ -1,4 +1,4 @@
-import { createMap, emptyCollection, addAirportsLayer, fetchJson } from './map-base.js';
+import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, DEPARTURE_COLOR, ARRIVAL_COLOR } from './map-base.js';
 
 const LIVE_FLIGHTS_URL = '/flights/live/flights';
 const LIVE_AIRPORTS_URL = '/flights/live/airports';
@@ -8,7 +8,8 @@ const map = createMap('map');
 
 let flightsData = emptyCollection();
 let airportsData = emptyCollection();
-let selectedIcao = null;
+let selection = null; // { type: 'airport', icao } | { type: 'aircraft', callsign }
+let hideUngrounded = false;
 
 // Small aircraft glyph drawn at runtime so no binary asset file is needed.
 function loadAircraftIcon() {
@@ -24,8 +25,21 @@ function loadAircraftIcon() {
     });
 }
 
+function legendDot(color) {
+    return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
+}
+
 function airportCoords(icao) {
     return airportsData.features.find((f) => f.properties.icao === icao)?.geometry.coordinates ?? null;
+}
+
+// Aircraft whose session was never seen connected on the ground at their
+// filed departure airport - so we can't vouch for the departure leg - are
+// excluded here when the "hide untracked departures" checkbox is ticked.
+function visibleFlights() {
+    return hideUngrounded
+        ? flightsData.features.filter((f) => f.properties.connected_on_ground)
+        : flightsData.features;
 }
 
 function line(a, b, kind) {
@@ -33,9 +47,10 @@ function line(a, b, kind) {
 }
 
 /**
- * For the clicked airport: one line from the airport to each aircraft
- * currently flying to/from it, plus one line from each of those aircraft
- * onward to the *other* airport in its dep/arr pair.
+ * For the clicked airport: a departure- or arrival-colored line from the
+ * airport to each aircraft flying to/from it (colored by whether *this*
+ * airport is that aircraft's departure or arrival), plus a same-colored line
+ * continuing from the aircraft onward to the *other* airport in its pair.
  */
 function buildAirportLinks(icao) {
     const airportPos = airportCoords(icao);
@@ -44,63 +59,135 @@ function buildAirportLinks(icao) {
     const features = [];
     const callsigns = [];
 
-    for (const flight of flightsData.features) {
+    for (const flight of visibleFlights()) {
         const { dep, arr, callsign } = flight.properties;
         if (dep !== icao && arr !== icao) continue;
 
         callsigns.push(callsign);
         const aircraftPos = flight.geometry.coordinates;
-        features.push(line(airportPos, aircraftPos, 'to-aircraft'));
+        const kind = dep === icao ? 'departure' : 'arrival';
+
+        features.push(line(airportPos, aircraftPos, kind));
 
         const other = dep === icao ? arr : dep;
         const otherPos = other && other !== icao ? airportCoords(other) : null;
         if (otherPos) {
-            features.push(line(aircraftPos, otherPos, 'to-airport'));
+            features.push(line(aircraftPos, otherPos, kind));
         }
     }
 
     return { collection: { type: 'FeatureCollection', features }, callsigns };
 }
 
-function selectAirport(icao) {
-    selectedIcao = icao;
-    const { collection, callsigns } = buildAirportLinks(icao);
+// For the clicked aircraft: a departure-colored line to its departure
+// airport and an arrival-colored line to its arrival airport.
+function buildAircraftLinks(flight) {
+    const { dep, arr } = flight.properties;
+    const aircraftPos = flight.geometry.coordinates;
+    const features = [];
 
-    map.getSource('airport-links')?.setData(collection);
+    const depPos = dep ? airportCoords(dep) : null;
+    if (depPos) features.push(line(aircraftPos, depPos, 'departure'));
+
+    const arrPos = arr ? airportCoords(arr) : null;
+    if (arrPos) features.push(line(aircraftPos, arrPos, 'arrival'));
+
+    return { type: 'FeatureCollection', features };
+}
+
+function applySelection() {
+    if (!selection) {
+        map.getSource('airport-links')?.setData(emptyCollection());
+        map.setLayoutProperty('airport-links', 'visibility', 'none');
+        map.setPaintProperty('live-flights-symbols', 'icon-opacity', 1);
+        map.setPaintProperty('airports-circles', 'circle-opacity', 0.8);
+        map.setPaintProperty('airports-circles', 'circle-stroke-width', 1);
+        return;
+    }
+
+    if (selection.type === 'airport') {
+        const { icao } = selection;
+        const { collection, callsigns } = buildAirportLinks(icao);
+
+        map.getSource('airport-links')?.setData(collection);
+        map.setLayoutProperty('airport-links', 'visibility', 'visible');
+        map.setPaintProperty('live-flights-symbols', 'icon-opacity', [
+            'case', ['in', ['get', 'callsign'], ['literal', callsigns]], 1, 0.2,
+        ]);
+        map.setPaintProperty('airports-circles', 'circle-opacity', [
+            'case', ['==', ['get', 'icao'], icao], 0.95, 0.25,
+        ]);
+        map.setPaintProperty('airports-circles', 'circle-stroke-width', [
+            'case', ['==', ['get', 'icao'], icao], 3, 1,
+        ]);
+        return;
+    }
+
+    const flight = flightsData.features.find((f) => f.properties.callsign === selection.callsign);
+    if (!flight) {
+        selection = null;
+        applySelection();
+        return;
+    }
+
+    const { dep, arr } = flight.properties;
+    const pairIcaos = [dep, arr].filter(Boolean);
+
+    map.getSource('airport-links')?.setData(buildAircraftLinks(flight));
     map.setLayoutProperty('airport-links', 'visibility', 'visible');
-
     map.setPaintProperty('live-flights-symbols', 'icon-opacity', [
-        'case',
-        ['in', ['get', 'callsign'], ['literal', callsigns]], 1,
-        0.2,
+        'case', ['==', ['get', 'callsign'], selection.callsign], 1, 0.2,
     ]);
     map.setPaintProperty('airports-circles', 'circle-opacity', [
-        'case',
-        ['==', ['get', 'icao'], icao], 0.95,
-        0.25,
+        'case', ['in', ['get', 'icao'], ['literal', pairIcaos]], 0.95, 0.25,
     ]);
     map.setPaintProperty('airports-circles', 'circle-stroke-width', [
-        'case',
-        ['==', ['get', 'icao'], icao], 3,
-        1,
+        'case', ['in', ['get', 'icao'], ['literal', pairIcaos]], 3, 1,
     ]);
+}
+
+function selectAirport(icao) {
+    selection = { type: 'airport', icao };
+    applySelection();
+}
+
+function selectAircraft(callsign) {
+    selection = { type: 'aircraft', callsign };
+    applySelection();
 }
 
 function clearSelection() {
-    selectedIcao = null;
+    selection = null;
+    applySelection();
+}
 
-    map.getSource('airport-links')?.setData(emptyCollection());
-    map.setLayoutProperty('airport-links', 'visibility', 'none');
-    map.setPaintProperty('live-flights-symbols', 'icon-opacity', 1);
-    map.setPaintProperty('airports-circles', 'circle-opacity', 0.8);
-    map.setPaintProperty('airports-circles', 'circle-stroke-width', 1);
+function airportPopupHtml(p) {
+    const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
+    const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
+
+    return `<strong>${p.icao}</strong> — ${p.name}<br>`
+        + `${legendDot(DEPARTURE_COLOR)}Departures: ${p.departures}${depNote}<br>`
+        + `${legendDot(ARRIVAL_COLOR)}Arrivals: ${p.arrivals}${arrNote}<br>`
+        + `Total: ${p.total}`;
+}
+
+function aircraftPopupHtml(p) {
+    return `<strong>${p.callsign}</strong><br>`
+        + `${legendDot(DEPARTURE_COLOR)}${p.dep ?? '?'} → ${legendDot(ARRIVAL_COLOR)}${p.arr ?? '?'}<br>`
+        + `${p.aircraft ?? ''}<br>FL${Math.round((p.altitude ?? 0) / 100)} / ${p.groundspeed ?? 0} kt`;
 }
 
 map.on('load', async () => {
+    addFirBoundariesLayer(map);
+
     addAirportsLayer(map, {
         onClick: (feature) => selectAirport(feature.properties.icao),
-        // 1 aircraft -> tiny dot; 50+ aircraft -> large, hard-to-miss circle.
-        radiusStops: [1, 4, 5, 7, 15, 12, 30, 18, 50, 26, 100, 36],
+        popupHtml: airportPopupHtml,
+        // Tiny dot for 1-5 aircraft, a bit larger for 6-10, then growing
+        // steadily up to a large circle at 150+.
+        radiusStops: [1, 4, 5, 6, 10, 8, 30, 14, 80, 24, 150, 36],
+        // Blue (1-10) -> light orange (11-30) -> dark orange (31-80) -> red (80-150+).
+        colorExpression: ['step', ['get', 'total'], '#38bdf8', 11, '#fb923c', 31, '#c2410c', 80, '#dc2626'],
     });
 
     map.addSource('airport-links', { type: 'geojson', data: emptyCollection() });
@@ -110,9 +197,8 @@ map.on('load', async () => {
         source: 'airport-links',
         layout: { visibility: 'none' },
         paint: {
-            'line-color': ['match', ['get', 'kind'], 'to-airport', '#f97316', '#38bdf8'],
+            'line-color': ['match', ['get', 'kind'], 'departure', DEPARTURE_COLOR, 'arrival', ARRIVAL_COLOR, '#94a3b8'],
             'line-width': 1.5,
-            'line-dasharray': ['match', ['get', 'kind'], 'to-airport', ['literal', [2, 2]], ['literal', [1, 0]]],
             'line-opacity': 0.85,
         },
     }, 'airports-circles');
@@ -136,10 +222,14 @@ map.on('load', async () => {
     });
 
     map.on('click', 'live-flights-symbols', (e) => {
-        const p = e.features[0].properties;
+        const feature = e.features[0];
+        const p = feature.properties;
+
+        selectAircraft(p.callsign);
+
         new mapboxgl.Popup()
-            .setLngLat(e.features[0].geometry.coordinates)
-            .setHTML(`<strong>${p.callsign}</strong><br>${p.dep ?? '?'} → ${p.arr ?? '?'}<br>${p.aircraft ?? ''}<br>FL${Math.round((p.altitude ?? 0) / 100)} / ${p.groundspeed ?? 0} kt`)
+            .setLngLat(feature.geometry.coordinates)
+            .setHTML(aircraftPopupHtml(p))
             .addTo(map);
     });
 
@@ -147,12 +237,18 @@ map.on('load', async () => {
     map.on('mouseleave', 'live-flights-symbols', () => (map.getCanvas().style.cursor = ''));
 
     // Clicking empty map background (i.e. not an airport or an aircraft)
-    // clears the current airport selection/links.
+    // clears the current selection/links.
     map.on('click', (e) => {
         const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'live-flights-symbols'] });
         if (hits.length === 0) {
             clearSelection();
         }
+    });
+
+    document.getElementById('hide-ungrounded')?.addEventListener('change', (e) => {
+        hideUngrounded = e.target.checked;
+        map.setFilter('live-flights-symbols', hideUngrounded ? ['==', ['get', 'connected_on_ground'], true] : null);
+        applySelection();
     });
 
     const refresh = async () => {
@@ -166,9 +262,7 @@ map.on('load', async () => {
         map.getSource('live-flights')?.setData(flightsData);
         map.getSource('airports')?.setData(airportsData);
 
-        if (selectedIcao) {
-            map.getSource('airport-links')?.setData(buildAirportLinks(selectedIcao).collection);
-        }
+        applySelection();
     };
 
     refresh();

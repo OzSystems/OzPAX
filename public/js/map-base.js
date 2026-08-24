@@ -17,6 +17,10 @@ export function emptyCollection() {
     return { type: 'FeatureCollection', features: [] };
 }
 
+// Shared so that route-line colors and their popup legends always match.
+export const DEPARTURE_COLOR = '#38bdf8';
+export const ARRIVAL_COLOR = '#f97316';
+
 export function fetchJson(url) {
     return fetch(url).then((res) => res.json());
 }
@@ -28,16 +32,46 @@ export function refreshSource(map, sourceId, url) {
 }
 
 /**
+ * Adds VATSpy's worldwide FIR/sector boundary polygons as a light overlay,
+ * proxied through our own backend (see MapController::firBoundaries) so the
+ * 2MB dataset is fetched from GitHub once and cached rather than on every
+ * page load. Purely decorative context - drawn as thin lines only, no fill,
+ * so it doesn't compete visually with airports/aircraft on top of it.
+ */
+export function addFirBoundariesLayer(map) {
+    map.addSource('fir-boundaries', { type: 'geojson', data: '/flights/fir-boundaries' });
+
+    map.addLayer({
+        id: 'fir-boundaries-lines',
+        type: 'line',
+        source: 'fir-boundaries',
+        paint: {
+            'line-color': '#fb923c',
+            'line-width': 1,
+            'line-opacity': 0.35,
+        },
+    });
+}
+
+/**
  * Adds an 'airports' GeoJSON source + a circle layer sized/colored by the
  * feature's 'total' property, with a click popup and hover cursor. Shared by
  * both the live map (in-progress traffic counts) and the past-flights map
  * (historic totals) - only the data feeding the source (and, optionally, the
  * radius scale) differs.
  */
-export function addAirportsLayer(map, { onClick, radiusStops } = {}) {
+function defaultAirportPopupHtml(p) {
+    const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
+    const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
+
+    return `<strong>${p.icao}</strong> — ${p.name}<br>Departures: ${p.departures}${depNote}<br>Arrivals: ${p.arrivals}${arrNote}<br>Total: ${p.total}`;
+}
+
+export function addAirportsLayer(map, { onClick, radiusStops, colorExpression, popupHtml } = {}) {
     map.addSource('airports', { type: 'geojson', data: emptyCollection() });
 
     const radius = radiusStops ?? [1, 5, 20, 10, 100, 16, 500, 26];
+    const color = colorExpression ?? ['interpolate', ['linear'], ['get', 'total'], 1, '#38bdf8', 50, '#facc15', 200, '#f97316', 500, '#ef4444'];
 
     map.addLayer({
         id: 'airports-circles',
@@ -45,7 +79,7 @@ export function addAirportsLayer(map, { onClick, radiusStops } = {}) {
         source: 'airports',
         paint: {
             'circle-radius': ['interpolate', ['linear'], ['get', 'total'], ...radius],
-            'circle-color': ['interpolate', ['linear'], ['get', 'total'], 1, '#38bdf8', 50, '#facc15', 200, '#f97316', 500, '#ef4444'],
+            'circle-color': color,
             'circle-opacity': 0.8,
             'circle-stroke-width': 1,
             'circle-stroke-color': '#0c2a43',
@@ -54,13 +88,10 @@ export function addAirportsLayer(map, { onClick, radiusStops } = {}) {
 
     map.on('click', 'airports-circles', (e) => {
         const feature = e.features[0];
-        const p = feature.properties;
-        const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
-        const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
 
         new mapboxgl.Popup()
             .setLngLat(feature.geometry.coordinates)
-            .setHTML(`<strong>${p.icao}</strong> — ${p.name}<br>Departures: ${p.departures}${depNote}<br>Arrivals: ${p.arrivals}${arrNote}<br>Total: ${p.total}`)
+            .setHTML((popupHtml ?? defaultAirportPopupHtml)(feature.properties))
             .addTo(map);
 
         onClick?.(feature);

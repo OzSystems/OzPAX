@@ -6,12 +6,17 @@ use App\Jobs\RecalculateFlightReroutes;
 use App\Models\Airport;
 use App\Models\Flight;
 use App\Models\FlightSession;
+use GuzzleHttp\Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class MapController extends Controller
 {
+    private const FIR_BOUNDARIES_URL = 'https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson';
+
     public function live()
     {
         return view('live');
@@ -22,12 +27,38 @@ class MapController extends Controller
         return view('past-flights');
     }
 
+    /**
+     * VATSpy's worldwide FIR/sector boundary polygons, proxied and cached to
+     * a local file so the map doesn't hit GitHub on every page load. Cached
+     * to disk rather than the (database-backed) cache store because the ~2MB
+     * payload exceeds MySQL's max_allowed_packet as a single cache row.
+     */
+    public function firBoundaries(): Response
+    {
+        $path = storage_path('app/vatspy-fir-boundaries.geojson');
+        $isStale = ! is_file($path) || filemtime($path) < now()->subDays(7)->timestamp;
+
+        if ($isStale) {
+            try {
+                file_put_contents($path, (string) (new Client)->get(self::FIR_BOUNDARIES_URL)->getBody());
+            } catch (\Throwable $e) {
+                if (! is_file($path)) {
+                    throw $e;
+                }
+
+                Log::warning('firBoundaries: refresh failed, serving stale cached copy - '.$e->getMessage());
+            }
+        }
+
+        return response(file_get_contents($path), 200, ['Content-Type' => 'application/json']);
+    }
+
     public function liveFlights(): JsonResponse
     {
         $sessions = FlightSession::where('status', 'airborne')
             ->whereNotNull('lat')
             ->whereNotNull('lon')
-            ->get(['callsign', 'dep', 'arr', 'aircraft_icao', 'altitude', 'groundspeed', 'heading', 'lat', 'lon']);
+            ->get(['callsign', 'dep', 'arr', 'aircraft_icao', 'altitude', 'groundspeed', 'heading', 'lat', 'lon', 'connected_on_ground']);
 
         $features = $sessions->map(fn (FlightSession $session) => [
             'type' => 'Feature',
@@ -43,6 +74,7 @@ class MapController extends Controller
                 'altitude' => $session->altitude,
                 'groundspeed' => $session->groundspeed,
                 'heading' => (float) ($session->heading ?? 0),
+                'connected_on_ground' => (bool) $session->connected_on_ground,
             ],
         ])->values();
 
