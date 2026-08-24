@@ -1,10 +1,14 @@
-import { createMap, emptyCollection, addAirportsLayer, refreshSource } from './map-base.js';
+import { createMap, emptyCollection, addAirportsLayer, fetchJson } from './map-base.js';
 
 const LIVE_FLIGHTS_URL = '/flights/live/flights';
 const LIVE_AIRPORTS_URL = '/flights/live/airports';
 const POLL_MS = 20_000; // VATSIM datafeed is cached server-side for 15s
 
 const map = createMap('map');
+
+let flightsData = emptyCollection();
+let airportsData = emptyCollection();
+let selectedIcao = null;
 
 // Small aircraft glyph drawn at runtime so no binary asset file is needed.
 function loadAircraftIcon() {
@@ -20,8 +24,98 @@ function loadAircraftIcon() {
     });
 }
 
+function airportCoords(icao) {
+    return airportsData.features.find((f) => f.properties.icao === icao)?.geometry.coordinates ?? null;
+}
+
+function line(a, b, kind) {
+    return { type: 'Feature', geometry: { type: 'LineString', coordinates: [a, b] }, properties: { kind } };
+}
+
+/**
+ * For the clicked airport: one line from the airport to each aircraft
+ * currently flying to/from it, plus one line from each of those aircraft
+ * onward to the *other* airport in its dep/arr pair.
+ */
+function buildAirportLinks(icao) {
+    const airportPos = airportCoords(icao);
+    if (!airportPos) return { collection: emptyCollection(), callsigns: [] };
+
+    const features = [];
+    const callsigns = [];
+
+    for (const flight of flightsData.features) {
+        const { dep, arr, callsign } = flight.properties;
+        if (dep !== icao && arr !== icao) continue;
+
+        callsigns.push(callsign);
+        const aircraftPos = flight.geometry.coordinates;
+        features.push(line(airportPos, aircraftPos, 'to-aircraft'));
+
+        const other = dep === icao ? arr : dep;
+        const otherPos = other && other !== icao ? airportCoords(other) : null;
+        if (otherPos) {
+            features.push(line(aircraftPos, otherPos, 'to-airport'));
+        }
+    }
+
+    return { collection: { type: 'FeatureCollection', features }, callsigns };
+}
+
+function selectAirport(icao) {
+    selectedIcao = icao;
+    const { collection, callsigns } = buildAirportLinks(icao);
+
+    map.getSource('airport-links')?.setData(collection);
+    map.setLayoutProperty('airport-links', 'visibility', 'visible');
+
+    map.setPaintProperty('live-flights-symbols', 'icon-opacity', [
+        'case',
+        ['in', ['get', 'callsign'], ['literal', callsigns]], 1,
+        0.2,
+    ]);
+    map.setPaintProperty('airports-circles', 'circle-opacity', [
+        'case',
+        ['==', ['get', 'icao'], icao], 0.95,
+        0.25,
+    ]);
+    map.setPaintProperty('airports-circles', 'circle-stroke-width', [
+        'case',
+        ['==', ['get', 'icao'], icao], 3,
+        1,
+    ]);
+}
+
+function clearSelection() {
+    selectedIcao = null;
+
+    map.getSource('airport-links')?.setData(emptyCollection());
+    map.setLayoutProperty('airport-links', 'visibility', 'none');
+    map.setPaintProperty('live-flights-symbols', 'icon-opacity', 1);
+    map.setPaintProperty('airports-circles', 'circle-opacity', 0.8);
+    map.setPaintProperty('airports-circles', 'circle-stroke-width', 1);
+}
+
 map.on('load', async () => {
-    addAirportsLayer(map);
+    addAirportsLayer(map, {
+        onClick: (feature) => selectAirport(feature.properties.icao),
+        // 1 aircraft -> tiny dot; 50+ aircraft -> large, hard-to-miss circle.
+        radiusStops: [1, 4, 5, 7, 15, 12, 30, 18, 50, 26, 100, 36],
+    });
+
+    map.addSource('airport-links', { type: 'geojson', data: emptyCollection() });
+    map.addLayer({
+        id: 'airport-links',
+        type: 'line',
+        source: 'airport-links',
+        layout: { visibility: 'none' },
+        paint: {
+            'line-color': ['match', ['get', 'kind'], 'to-airport', '#f97316', '#38bdf8'],
+            'line-width': 1.5,
+            'line-dasharray': ['match', ['get', 'kind'], 'to-airport', ['literal', [2, 2]], ['literal', [1, 0]]],
+            'line-opacity': 0.85,
+        },
+    }, 'airports-circles');
 
     const aircraftIcon = await loadAircraftIcon();
     map.addImage('aircraft', aircraftIcon, { pixelRatio: 2 });
@@ -52,9 +146,29 @@ map.on('load', async () => {
     map.on('mouseenter', 'live-flights-symbols', () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', 'live-flights-symbols', () => (map.getCanvas().style.cursor = ''));
 
-    const refresh = () => {
-        refreshSource(map, 'live-flights', LIVE_FLIGHTS_URL);
-        refreshSource(map, 'airports', LIVE_AIRPORTS_URL);
+    // Clicking empty map background (i.e. not an airport or an aircraft)
+    // clears the current airport selection/links.
+    map.on('click', (e) => {
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['airports-circles', 'live-flights-symbols'] });
+        if (hits.length === 0) {
+            clearSelection();
+        }
+    });
+
+    const refresh = async () => {
+        const [flights, airports] = await Promise.all([
+            fetchJson(LIVE_FLIGHTS_URL),
+            fetchJson(LIVE_AIRPORTS_URL),
+        ]);
+
+        flightsData = flights;
+        airportsData = airports;
+        map.getSource('live-flights')?.setData(flightsData);
+        map.getSource('airports')?.setData(airportsData);
+
+        if (selectedIcao) {
+            map.getSource('airport-links')?.setData(buildAirportLinks(selectedIcao).collection);
+        }
     };
 
     refresh();

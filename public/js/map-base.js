@@ -31,17 +31,20 @@ export function refreshSource(map, sourceId, url) {
  * Adds an 'airports' GeoJSON source + a circle layer sized/colored by the
  * feature's 'total' property, with a click popup and hover cursor. Shared by
  * both the live map (in-progress traffic counts) and the past-flights map
- * (historic totals) - only the data feeding the source differs.
+ * (historic totals) - only the data feeding the source (and, optionally, the
+ * radius scale) differs.
  */
-export function addAirportsLayer(map, { onClick } = {}) {
+export function addAirportsLayer(map, { onClick, radiusStops } = {}) {
     map.addSource('airports', { type: 'geojson', data: emptyCollection() });
+
+    const radius = radiusStops ?? [1, 5, 20, 10, 100, 16, 500, 26];
 
     map.addLayer({
         id: 'airports-circles',
         type: 'circle',
         source: 'airports',
         paint: {
-            'circle-radius': ['interpolate', ['linear'], ['get', 'total'], 1, 5, 20, 10, 100, 16, 500, 26],
+            'circle-radius': ['interpolate', ['linear'], ['get', 'total'], ...radius],
             'circle-color': ['interpolate', ['linear'], ['get', 'total'], 1, '#38bdf8', 50, '#facc15', 200, '#f97316', 500, '#ef4444'],
             'circle-opacity': 0.8,
             'circle-stroke-width': 1,
