@@ -1,4 +1,4 @@
-import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, refreshSource } from './map-base.js';
+import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson } from './map-base.js';
 
 const PAST_AIRPORTS_URL = '/flights/past/airports';
 const PAST_ROUTES_URL = '/flights/past/routes';
@@ -7,6 +7,7 @@ const POLL_MS = 60_000; // historic totals only change as flights complete
 const map = createMap('map');
 
 let routesData = emptyCollection();
+let airportsData = emptyCollection();
 
 function connectedIcaos(icao) {
     const connected = new Set();
@@ -62,6 +63,34 @@ function routePopupHtml(p) {
     return html;
 }
 
+function flyToAirport(icao) {
+    const feature = airportsData.features.find((f) => f.properties.icao === icao);
+    if (!feature) return;
+
+    map.flyTo({ center: feature.geometry.coordinates, zoom: 9 });
+    selectAirport(icao);
+}
+
+function renderStats() {
+    const stats = document.getElementById('stats');
+    if (!stats) return;
+
+    const top = [...airportsData.features]
+        .sort((a, b) => b.properties.total - a.properties.total)
+        .slice(0, 30);
+
+    const rows = top.length
+        ? top.map((f) => (
+            `<div class="row">`
+            + `<a href="#" class="icao" data-icao="${f.properties.icao}">${f.properties.icao}</a>`
+            + `<span class="counts">${f.properties.departures} dep / ${f.properties.arrivals} arr</span>`
+            + `</div>`
+        )).join('')
+        : '<div class="row"><span>—</span></div>';
+
+    stats.innerHTML = `<div class="heading">Top 30 airports</div>${rows}`;
+}
+
 map.on('load', async () => {
     addFirBoundariesLayer(map);
 
@@ -100,10 +129,22 @@ map.on('load', async () => {
         }
     });
 
+    document.getElementById('stats')?.addEventListener('click', (e) => {
+        const link = e.target.closest('a.icao');
+        if (!link) return;
+
+        e.preventDefault();
+        flyToAirport(link.dataset.icao);
+    });
+
     const refresh = async () => {
-        refreshSource(map, 'airports', PAST_AIRPORTS_URL);
+        airportsData = await fetchJson(PAST_AIRPORTS_URL);
+        map.getSource('airports')?.setData(airportsData);
+
         routesData = await fetchJson(PAST_ROUTES_URL);
         map.getSource('routes')?.setData(routesData);
+
+        renderStats();
     };
 
     await refresh();
