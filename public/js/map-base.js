@@ -67,10 +67,10 @@ function defaultAirportPopupHtml(p) {
     return `<strong>${p.icao}</strong> — ${p.name}<br>Departures: ${p.departures}${depNote}<br>Arrivals: ${p.arrivals}${arrNote}<br>Total: ${p.total}`;
 }
 
-export function addAirportsLayer(map, { onClick, radiusStops, colorExpression, popupHtml } = {}) {
+export function addAirportsLayer(map, { onClick, radiusStops, radiusExpression, colorExpression, popupHtml } = {}) {
     map.addSource('airports', { type: 'geojson', data: emptyCollection() });
 
-    const radius = radiusStops ?? [1, 5, 20, 10, 100, 16, 500, 26];
+    const radius = radiusExpression ?? ['interpolate', ['linear'], ['get', 'total'], ...(radiusStops ?? [1, 5, 20, 10, 100, 16, 500, 26])];
     const color = colorExpression ?? ['interpolate', ['linear'], ['get', 'total'], 1, '#38bdf8', 50, '#facc15', 200, '#f97316', 500, '#ef4444'];
 
     map.addLayer({
@@ -78,7 +78,7 @@ export function addAirportsLayer(map, { onClick, radiusStops, colorExpression, p
         type: 'circle',
         source: 'airports',
         paint: {
-            'circle-radius': ['interpolate', ['linear'], ['get', 'total'], ...radius],
+            'circle-radius': radius,
             'circle-color': color,
             'circle-opacity': 0.8,
             'circle-stroke-width': 1,

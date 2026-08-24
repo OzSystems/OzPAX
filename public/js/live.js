@@ -9,14 +9,16 @@ const map = createMap('map');
 let flightsData = emptyCollection();
 let airportsData = emptyCollection();
 let selection = null; // { type: 'airport', icao } | { type: 'aircraft', callsign }
-let hideUngrounded = false;
+
+const TRACKED_COLOR = '#f8fafc';
+const UNTRACKED_COLOR = '#64748b';
 
 // Small aircraft glyph drawn at runtime so no binary asset file is needed.
-function loadAircraftIcon() {
+function loadAircraftIcon(fillColor) {
     const svg = `
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
             <path d="M16 1 L20 13 L30 18 L20 19 L21 27 L26 30 L16 28 L6 30 L11 27 L12 19 L2 18 L12 13 Z"
-                  fill="#f8fafc" stroke="#0c2a43" stroke-width="1"/>
+                  fill="${fillColor}" stroke="#0c2a43" stroke-width="1"/>
         </svg>`;
     const img = new Image(32, 32);
     return new Promise((resolve) => {
@@ -31,15 +33,6 @@ function legendDot(color) {
 
 function airportCoords(icao) {
     return airportsData.features.find((f) => f.properties.icao === icao)?.geometry.coordinates ?? null;
-}
-
-// Aircraft whose session was never seen connected on the ground at their
-// filed departure airport - so we can't vouch for the departure leg - are
-// excluded here when the "hide untracked departures" checkbox is ticked.
-function visibleFlights() {
-    return hideUngrounded
-        ? flightsData.features.filter((f) => f.properties.connected_on_ground)
-        : flightsData.features;
 }
 
 function line(a, b, kind) {
@@ -59,7 +52,7 @@ function buildAirportLinks(icao) {
     const features = [];
     const callsigns = [];
 
-    for (const flight of visibleFlights()) {
+    for (const flight of flightsData.features) {
         const { dep, arr, callsign } = flight.properties;
         if (dep !== icao && arr !== icao) continue;
 
@@ -172,10 +165,49 @@ function airportPopupHtml(p) {
 }
 
 function aircraftPopupHtml(p) {
+    if (!p.connected_on_ground) {
+        return `<strong>${p.callsign}</strong><br>Connected in air, will not count to data`;
+    }
+
     return `<strong>${p.callsign}</strong><br>`
         + `${legendDot(DEPARTURE_COLOR)}${p.dep ?? '?'} → ${legendDot(ARRIVAL_COLOR)}${p.arr ?? '?'}<br>`
         + `${p.aircraft ?? ''}<br>FL${Math.round((p.altitude ?? 0) / 100)} / ${p.groundspeed ?? 0} kt`;
 }
+
+function renderStats() {
+    const stats = document.getElementById('stats');
+    if (!stats) return;
+
+    const trackedCount = flightsData.features.filter((f) => f.properties.connected_on_ground).length;
+
+    const topAirports = [...airportsData.features]
+        .sort((a, b) => b.properties.total - a.properties.total)
+        .slice(0, 5);
+
+    const rows = topAirports.length
+        ? topAirports.map((f) => `<div class="row"><span>${f.properties.icao}</span><span>${f.properties.total}</span></div>`).join('')
+        : '<div class="row"><span>—</span></div>';
+
+    stats.innerHTML = `
+        <div class="row"><span>Tracked aircraft</span><span>${trackedCount}</span></div>
+        <div class="heading">Top 5 airport movements</div>
+        ${rows}
+    `;
+}
+
+// Ground resolution at zoom 20 is ~0.075m/pixel at the equator; dividing by
+// cos(latitude) corrects for Web Mercator's north/south stretching. Feeding
+// that into a base-2 exponential zoom interpolation from (0, 0) makes the
+// circle represent a constant real-world size (up to the 10nm cap) at any
+// zoom or latitude, rather than a flat pixel radius that never matches the
+// map's actual scale as you zoom in or out.
+const NM_IN_METERS = 1852;
+const GROUND_RES_AT_Z20 = 0.075;
+const AIRPORT_RADIUS_METERS = ['*', NM_IN_METERS, ['interpolate', ['linear'], ['get', 'total'],
+    1, 0.5, 5, 1, 10, 2, 30, 4, 80, 7, 150, 10,
+]];
+const AIRPORT_RADIUS_PX_AT_Z20 = ['/', AIRPORT_RADIUS_METERS, ['*', GROUND_RES_AT_Z20, ['cos', ['*', ['get', 'lat'], Math.PI / 180]]]];
+const AIRPORT_RADIUS_EXPRESSION = ['interpolate', ['exponential', 2], ['zoom'], 0, 0, 20, AIRPORT_RADIUS_PX_AT_Z20];
 
 map.on('load', async () => {
     addFirBoundariesLayer(map);
@@ -183,9 +215,9 @@ map.on('load', async () => {
     addAirportsLayer(map, {
         onClick: (feature) => selectAirport(feature.properties.icao),
         popupHtml: airportPopupHtml,
-        // Tiny dot for 1-5 aircraft, a bit larger for 6-10, then growing
-        // steadily up to a large circle at 150+.
-        radiusStops: [1, 4, 5, 6, 10, 8, 30, 14, 80, 24, 150, 36],
+        // A fixed real-world radius (0.5nm-10nm depending on traffic) rather
+        // than a flat pixel size - see AIRPORT_RADIUS_EXPRESSION above.
+        radiusExpression: AIRPORT_RADIUS_EXPRESSION,
         // Blue (1-10) -> light orange (11-30) -> dark orange (31-80) -> red (80-150+).
         colorExpression: ['step', ['get', 'total'], '#38bdf8', 11, '#fb923c', 31, '#c2410c', 80, '#dc2626'],
     });
@@ -203,8 +235,12 @@ map.on('load', async () => {
         },
     }, 'airports-circles');
 
-    const aircraftIcon = await loadAircraftIcon();
-    map.addImage('aircraft', aircraftIcon, { pixelRatio: 2 });
+    const [trackedIcon, untrackedIcon] = await Promise.all([
+        loadAircraftIcon(TRACKED_COLOR),
+        loadAircraftIcon(UNTRACKED_COLOR),
+    ]);
+    map.addImage('aircraft-tracked', trackedIcon, { pixelRatio: 2 });
+    map.addImage('aircraft-untracked', untrackedIcon, { pixelRatio: 2 });
 
     map.addSource('live-flights', { type: 'geojson', data: emptyCollection() });
 
@@ -213,7 +249,7 @@ map.on('load', async () => {
         type: 'symbol',
         source: 'live-flights',
         layout: {
-            'icon-image': 'aircraft',
+            'icon-image': ['case', ['get', 'connected_on_ground'], 'aircraft-tracked', 'aircraft-untracked'],
             'icon-size': 1.2,
             'icon-rotate': ['get', 'heading'],
             'icon-rotation-alignment': 'map',
@@ -245,12 +281,6 @@ map.on('load', async () => {
         }
     });
 
-    document.getElementById('hide-ungrounded')?.addEventListener('change', (e) => {
-        hideUngrounded = e.target.checked;
-        map.setFilter('live-flights-symbols', hideUngrounded ? ['==', ['get', 'connected_on_ground'], true] : null);
-        applySelection();
-    });
-
     const refresh = async () => {
         const [flights, airports] = await Promise.all([
             fetchJson(LIVE_FLIGHTS_URL),
@@ -258,11 +288,21 @@ map.on('load', async () => {
         ]);
 
         flightsData = flights;
-        airportsData = airports;
+        // AIRPORT_RADIUS_EXPRESSION needs each feature's latitude directly as
+        // a property (style expressions can't read it out of the geometry).
+        airportsData = {
+            ...airports,
+            features: airports.features.map((f) => ({
+                ...f,
+                properties: { ...f.properties, lat: f.geometry.coordinates[1] },
+            })),
+        };
+
         map.getSource('live-flights')?.setData(flightsData);
         map.getSource('airports')?.setData(airportsData);
 
         applySelection();
+        renderStats();
     };
 
     refresh();

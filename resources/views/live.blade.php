@@ -22,36 +22,44 @@
                 inset: 0;
             }
 
-            #controls {
+            #stats {
                 position: fixed;
                 top: 12px;
                 left: 12px;
                 z-index: 1;
                 background: rgba(15, 23, 42, 0.85);
                 color: #e2e8f0;
-                padding: 8px 12px;
+                padding: 10px 14px;
                 border-radius: 6px;
                 font: 13px system-ui, sans-serif;
+                min-width: 170px;
             }
 
-            #controls label {
+            #stats .heading {
+                font-weight: 600;
+                color: #94a3b8;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                margin: 8px 0 2px;
+            }
+
+            #stats .heading:first-child {
+                margin-top: 0;
+            }
+
+            #stats .row {
                 display: flex;
-                align-items: center;
-                gap: 6px;
-                cursor: pointer;
-                white-space: nowrap;
+                justify-content: space-between;
+                gap: 12px;
+                line-height: 1.5;
             }
         </style>
     </head>
     <body>
         <div id="map"></div>
 
-        <div id="controls">
-            <label>
-                <input type="checkbox" id="hide-ungrounded">
-                Hide Aircraft that will not count towards data (did not connect on ground)
-            </label>
-        </div>
+        <div id="stats"></div>
 
         <script type="module" src="{{ asset('js/live.js') }}"></script>
     </body>

@@ -248,6 +248,14 @@ class RecordVatsimFlights implements ShouldQueue
         $dep = $router->reroute($session->dep, $airportRecords);
         $arr = $router->reroute($session->arr, $airportRecords);
 
+        if ($dep !== null && $dep === $arr) {
+            // Same-airport circuits (e.g. training touch-and-goes) aren't a
+            // real route and would only pollute per-airport/route stats.
+            Log::info("RecordVatsimFlights: skipped {$session->callsign} - departure and arrival are the same airport ({$dep})");
+
+            return;
+        }
+
         Flight::firstOrCreate(
             [
                 'cid' => $session->cid,
