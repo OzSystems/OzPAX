@@ -20,9 +20,11 @@ class SyncAirports implements ShouldQueue
     private const VATSPY_URL = 'https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/VATSpy.dat';
 
     // FIR name prefixes covering VATPAC's real-world jurisdiction: Australia
-    // (Melbourne/Brisbane) plus Fiji, French Polynesia, Nauru, PNG, and the
-    // Solomon Islands. New Zealand is deliberately excluded - it's VATNZ's
-    // territory, not VATPAC's, despite the two sometimes being conflated.
+    // (Melbourne/Brisbane, ICAO YMMM/YBBB) plus Fiji (Nadi, NFFF), PNG (Port
+    // Moresby, AYPM), the Solomon Islands (Honiara, AGGG), and Nauru (ANAU).
+    // New Zealand and French Polynesia (Tahiti) are deliberately excluded -
+    // they're VATNZ's territory, not VATPAC's, despite sometimes being
+    // conflated with it.
     private const VATPAC_FIR_NAME_PREFIXES = [
         'Melbourne',
         'Brisbane',
@@ -30,7 +32,6 @@ class SyncAirports implements ShouldQueue
         'Honiara',
         'Port Moresby',
         'Nauru',
-        'Tahiti',
     ];
 
     public function handle(): void

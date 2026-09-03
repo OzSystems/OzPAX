@@ -54,10 +54,46 @@
                 gap: 12px;
                 line-height: 1.5;
             }
+
+            #map-nav {
+                position: fixed;
+                top: 12px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 1;
+                display: flex;
+                gap: 2px;
+                background: rgba(15, 23, 42, 0.85);
+                border-radius: 999px;
+                padding: 4px;
+                font: 600 12px system-ui, sans-serif;
+            }
+
+            #map-nav a {
+                color: #94a3b8;
+                text-decoration: none;
+                padding: 6px 14px;
+                border-radius: 999px;
+            }
+
+            #map-nav a:hover {
+                color: #e2e8f0;
+            }
+
+            #map-nav a.active {
+                background: #38bdf8;
+                color: #0c2a43;
+            }
         </style>
     </head>
     <body>
         <div id="map"></div>
+
+        <nav id="map-nav">
+            <a href="{{ route('live') }}" class="active">Live</a>
+            <a href="{{ route('past-flights') }}">Past</a>
+            <a href="{{ route('heatmap') }}">Heatmap</a>
+        </nav>
 
         <div id="stats"></div>
 

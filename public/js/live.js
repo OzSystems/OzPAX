@@ -1,4 +1,4 @@
-import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, DEPARTURE_COLOR, ARRIVAL_COLOR } from './map-base.js';
+import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, DEPARTURE_COLOR, ARRIVAL_COLOR, legendDot } from './map-base.js';
 
 const LIVE_FLIGHTS_URL = '/flights/live/flights';
 const LIVE_AIRPORTS_URL = '/flights/live/airports';
@@ -27,16 +27,21 @@ function loadAircraftIcon(fillColor) {
     });
 }
 
-function legendDot(color) {
-    return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
-}
-
 function airportCoords(icao) {
     return airportsData.features.find((f) => f.properties.icao === icao)?.geometry.coordinates ?? null;
 }
 
+// Shifts b's longitude by a multiple of 360 so it's within 180deg of a's.
+// Mapbox GL draws LineStrings using the raw longitudes given, so a route
+// crossing the antimeridian (e.g. lon 179 to lon -179) would otherwise be
+// drawn the "long way" around - stretching across the entire map.
+function unwrapAntimeridian([lngA, latA], [lngB, latB]) {
+    lngB -= Math.round((lngB - lngA) / 360) * 360;
+    return [[lngA, latA], [lngB, latB]];
+}
+
 function line(a, b, kind) {
-    return { type: 'Feature', geometry: { type: 'LineString', coordinates: [a, b] }, properties: { kind } };
+    return { type: 'Feature', geometry: { type: 'LineString', coordinates: unwrapAntimeridian(a, b) }, properties: { kind } };
 }
 
 /**

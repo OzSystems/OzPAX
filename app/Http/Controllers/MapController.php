@@ -6,17 +6,13 @@ use App\Jobs\RecalculateFlightReroutes;
 use App\Models\Airport;
 use App\Models\Flight;
 use App\Models\FlightSession;
-use GuzzleHttp\Client;
+use App\Services\FirBoundaries;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class MapController extends Controller
 {
-    private const FIR_BOUNDARIES_URL = 'https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson';
-
     public function live()
     {
         return view('live');
@@ -27,30 +23,24 @@ class MapController extends Controller
         return view('past-flights');
     }
 
-    /**
-     * VATSpy's worldwide FIR/sector boundary polygons, proxied and cached to
-     * a local file so the map doesn't hit GitHub on every page load. Cached
-     * to disk rather than the (database-backed) cache store because the ~2MB
-     * payload exceeds MySQL's max_allowed_packet as a single cache row.
-     */
-    public function firBoundaries(): Response
+    public function heatmap()
     {
-        $path = storage_path('app/vatspy-fir-boundaries.geojson');
-        $isStale = ! is_file($path) || filemtime($path) < now()->subDays(7)->timestamp;
+        return view('heatmap');
+    }
 
-        if ($isStale) {
-            try {
-                file_put_contents($path, (string) (new Client)->get(self::FIR_BOUNDARIES_URL)->getBody());
-            } catch (\Throwable $e) {
-                if (! is_file($path)) {
-                    throw $e;
-                }
+    /**
+     * VATSpy's FIR/sector boundary polygons, filtered down to the VATPAC
+     * division only - the FIRs actually shown on our maps - rather than the
+     * full ~2MB worldwide dataset (see FirBoundaries for the fetch/cache).
+     */
+    public function firBoundaries(FirBoundaries $firBoundaries): JsonResponse
+    {
+        $features = array_values(array_filter(
+            $firBoundaries->geoJson()['features'],
+            fn (array $feature) => ($feature['properties']['division'] ?? null) === 'VATPAC'
+        ));
 
-                Log::warning('firBoundaries: refresh failed, serving stale cached copy - '.$e->getMessage());
-            }
-        }
-
-        return response(file_get_contents($path), 200, ['Content-Type' => 'application/json']);
+        return response()->json(['type' => 'FeatureCollection', 'features' => $features]);
     }
 
     public function liveFlights(): JsonResponse
@@ -140,8 +130,9 @@ class MapController extends Controller
 
     /**
      * One LineString per unique airport pair (both directions combined),
-     * using the (possibly rerouted) dep/arr, with a breakdown of any
-     * originally-observed pairs that got rerouted into this one.
+     * using the (possibly rerouted) dep/arr, with a directional breakdown
+     * (a->b vs b->a) and a breakdown of any originally-observed pairs that
+     * got rerouted into this one.
      */
     public function pastRoutes(): JsonResponse
     {
@@ -156,8 +147,9 @@ class MapController extends Controller
             sort($pair);
             $key = implode('|', $pair);
 
-            $routes[$key] ??= ['a' => $pair[0], 'b' => $pair[1], 'count' => 0, 'reroutes' => []];
+            $routes[$key] ??= ['a' => $pair[0], 'b' => $pair[1], 'count' => 0, 'aToB' => 0, 'bToA' => 0, 'reroutes' => []];
             $routes[$key]['count']++;
+            $routes[$key][$flight->dep === $routes[$key]['a'] ? 'aToB' : 'bToA']++;
 
             $originalDep = $flight->original_dep ?? $flight->dep;
             $originalArr = $flight->original_arr ?? $flight->arr;
@@ -183,15 +175,19 @@ class MapController extends Controller
                 'type' => 'Feature',
                 'geometry' => [
                     'type' => 'LineString',
-                    'coordinates' => [
-                        [(float) $coords[$r['a']]->lon, (float) $coords[$r['a']]->lat],
-                        [(float) $coords[$r['b']]->lon, (float) $coords[$r['b']]->lat],
-                    ],
+                    'coordinates' => $this->antimeridianSafeLine(
+                        (float) $coords[$r['a']]->lon,
+                        (float) $coords[$r['a']]->lat,
+                        (float) $coords[$r['b']]->lon,
+                        (float) $coords[$r['b']]->lat,
+                    ),
                 ],
                 'properties' => [
                     'airport_a' => $r['a'],
                     'airport_b' => $r['b'],
                     'count' => $r['count'],
+                    'a_to_b' => $r['aToB'],
+                    'b_to_a' => $r['bToA'],
                     'reroutes' => array_values($r['reroutes']),
                 ],
             ])
@@ -254,6 +250,20 @@ class MapController extends Controller
         return Airport::whereIn('icao', $icaos)
             ->where(fn ($q) => $q->where('lat', '!=', 0)->orWhere('lon', '!=', 0))
             ->get(['icao', 'name', 'lat', 'lon']);
+    }
+
+    /**
+     * A straight two-point line, with the second point's longitude shifted
+     * by a multiple of 360 so it's within 180deg of the first. Mapbox GL
+     * draws LineStrings using the raw longitudes given, so a route between
+     * e.g. lon 179 and lon -179 (a short hop across the antimeridian) would
+     * otherwise be drawn the "long way" - stretching across the entire map.
+     */
+    private function antimeridianSafeLine(float $lonA, float $latA, float $lonB, float $latB): array
+    {
+        $lonB -= round(($lonB - $lonA) / 360) * 360;
+
+        return [[$lonA, $latA], [$lonB, $latB]];
     }
 
     private function airportFeature(Airport $airport, array $properties): array

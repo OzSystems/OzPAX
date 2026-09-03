@@ -6,6 +6,7 @@ use App\Models\Airport;
 use App\Models\Flight;
 use App\Models\FlightSession;
 use App\Services\AirlabsClient;
+use App\Services\FirBoundaries;
 use App\Services\InternationalDestinationRouter;
 use App\Services\VatsimClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -42,7 +43,7 @@ class RecordVatsimFlights implements ShouldQueue
         return [(new WithoutOverlapping('record-vatsim-flights'))->dontRelease()->expireAfter(120)];
     }
 
-    public function handle(VatsimClient $vatsimClient, AirlabsClient $airlabsClient): void
+    public function handle(VatsimClient $vatsimClient, AirlabsClient $airlabsClient, FirBoundaries $firBoundaries): void
     {
         $pilots = $vatsimClient->getPilots();
 
@@ -66,7 +67,7 @@ class RecordVatsimFlights implements ShouldQueue
         $now = Carbon::now('UTC');
 
         foreach ($pilots as $pilot) {
-            $this->processPilot($pilot, $vatpacIcaos, $airportRecords, $router, $resolvedThisRun, $airlabsClient, $now);
+            $this->processPilot($pilot, $vatpacIcaos, $airportRecords, $router, $resolvedThisRun, $airlabsClient, $firBoundaries, $now);
         }
 
         $this->pruneDisconnected($now);
@@ -79,6 +80,7 @@ class RecordVatsimFlights implements ShouldQueue
         InternationalDestinationRouter $router,
         array &$resolvedThisRun,
         AirlabsClient $airlabsClient,
+        FirBoundaries $firBoundaries,
         Carbon $now
     ): void {
         $plan = $pilot->flight_plan ?? null;
@@ -96,8 +98,8 @@ class RecordVatsimFlights implements ShouldQueue
             return;
         }
 
-        $this->resolveAirport($dep, $airportRecords, $resolvedThisRun, $airlabsClient);
-        $this->resolveAirport($arr, $airportRecords, $resolvedThisRun, $airlabsClient);
+        $this->resolveAirport($dep, $airportRecords, $resolvedThisRun, $airlabsClient, $firBoundaries);
+        $this->resolveAirport($arr, $airportRecords, $resolvedThisRun, $airlabsClient, $firBoundaries);
 
         $logonTime = Carbon::parse($pilot->logon_time)->utc();
 
@@ -182,12 +184,15 @@ class RecordVatsimFlights implements ShouldQueue
      * Backfill an airport from Airlabs when it's completely unknown, or when
      * we already know it but are missing its runway elevation. Existing
      * classification (is_vatpac/fir_code/is_pseudo from VATSpy) is never
-     * touched - only genuinely missing fields are filled in.
+     * touched for an airport we already know - only genuinely missing
+     * fields are filled in. A brand-new airport gets its is_vatpac/fir_code
+     * determined geometrically, since it's by definition not in VATSpy (that's
+     * the only reason we're resolving it via Airlabs at all).
      *
      * @param  array<string, array{lat: float, lon: float, altitude: ?int}>  $airportRecords
      * @param  array<string, true>  $resolvedThisRun
      */
-    private function resolveAirport(?string $icao, array &$airportRecords, array &$resolvedThisRun, AirlabsClient $airlabsClient): void
+    private function resolveAirport(?string $icao, array &$airportRecords, array &$resolvedThisRun, AirlabsClient $airlabsClient, FirBoundaries $firBoundaries): void
     {
         if ($icao === null || isset($resolvedThisRun[$icao]) || ! $airlabsClient->hasApiKey()) {
             return;
@@ -220,12 +225,17 @@ class RecordVatsimFlights implements ShouldQueue
                 Airport::where('icao', $icao)->update($attributes);
             }
         } else {
+            $fir = isset($attributes['lat'], $attributes['lon'])
+                ? $firBoundaries->findVatpacFir($attributes['lat'], $attributes['lon'])
+                : null;
+
             Airport::create(array_merge([
                 'icao' => $icao,
                 'name' => $icao,
                 'lat' => 0,
                 'lon' => 0,
-                'is_vatpac' => false,
+                'fir_code' => $fir,
+                'is_vatpac' => $fir !== null,
                 'is_pseudo' => false,
             ], $attributes));
         }

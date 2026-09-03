@@ -21,6 +21,10 @@ export function emptyCollection() {
 export const DEPARTURE_COLOR = '#38bdf8';
 export const ARRIVAL_COLOR = '#f97316';
 
+export function legendDot(color) {
+    return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
+}
+
 export function fetchJson(url) {
     return fetch(url).then((res) => res.json());
 }

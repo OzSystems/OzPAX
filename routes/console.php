@@ -10,5 +10,5 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::job(new RecordVatsimFlights)->everyMinute();
+Schedule::job(new RecordVatsimFlights)->everyFifteenSeconds();
 Schedule::job(new SyncAirports)->daily();

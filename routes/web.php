@@ -22,6 +22,8 @@ Route::get('/flights/past/routes', [MapController::class, 'pastRoutes'])->name('
 Route::get('/flights/past/changes', [MapController::class, 'changes'])->name('past-flights.changes');
 Route::post('/flights/past/changes/recalculate', [MapController::class, 'recalculateChanges'])->name('past-flights.changes.recalculate');
 
+Route::get('/flights/heatmap', [MapController::class, 'heatmap'])->name('heatmap');
+
 // Local-only trigger to run the VATSIM ingest on demand without waiting for
 // the schedule - not exposed outside local so it can't be hit in production.
 Route::get('/dev/record-vatsim-flights', function () {
