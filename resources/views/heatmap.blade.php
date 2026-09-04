@@ -107,6 +107,32 @@
                 flex: none;
             }
 
+            #range-toggle {
+                display: flex;
+                gap: 4px;
+                margin-bottom: 10px;
+            }
+
+            #range-toggle button {
+                flex: 1;
+                background: rgba(255, 255, 255, 0.06);
+                border: none;
+                color: #94a3b8;
+                font: 600 11px system-ui, sans-serif;
+                padding: 6px 8px;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            #range-toggle button:hover {
+                color: #e2e8f0;
+            }
+
+            #range-toggle button.active {
+                background: #38bdf8;
+                color: #0c2a43;
+            }
+
             #legend-bar {
                 height: 8px;
                 border-radius: 4px;

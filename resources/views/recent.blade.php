@@ -122,7 +122,7 @@
         <nav id="map-nav">
             <a href="{{ route('live') }}">Live</a>
             <a href="{{ route('past-flights') }}">All History</a>
-            <a href="{{ route('recent') }}" class="active">Recent</a>
+            <a href="{{ route('recent') }}" class="active">Last 8 Weeks</a>
             <a href="{{ route('heatmap') }}">Heatmap</a>
         </nav>
 

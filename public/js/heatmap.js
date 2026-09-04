@@ -1,7 +1,9 @@
 import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, DEPARTURE_COLOR, ARRIVAL_COLOR, legendDot } from './map-base.js';
 
-const PAST_AIRPORTS_URL = '/flights/past/airports';
-const PAST_ROUTES_URL = '/flights/past/routes';
+const RANGE_URLS = {
+    all: { airports: '/flights/past/airports', routes: '/flights/past/routes' },
+    recent: { airports: '/flights/recent/airports', routes: '/flights/recent/routes' },
+};
 const POLL_MS = 60_000; // historic totals only change as flights complete
 const TOP_CORRIDORS_COUNT = 12;
 
@@ -10,6 +12,7 @@ const map = createMap('map');
 let routesData = emptyCollection();
 let airportsData = emptyCollection();
 let selectedIcao = null;
+let range = 'all';
 
 // Single-hue sequential ramp (magnitude encoding: "how much traffic"),
 // anchored for a dark basemap - near-zero fades toward the map's own dark
@@ -27,8 +30,17 @@ const HEAT_STOPS = [
     [1, '#cde2fb'],
 ];
 
+// A linear count/max ratio crushes everything below the single busiest
+// corridor into the bottom of the scale whenever one route dominates by a
+// wide margin (e.g. 361 vs a next-busiest of 55) - sqrt spreads the lower
+// end back out so meaningfully-different corridors still look different,
+// while the busiest one still tops out at 1.
+function magnitudeRatio(property, max) {
+    return ['sqrt', ['/', ['get', property], Math.max(1, max)]];
+}
+
 function heatColorExpression(property, max) {
-    const expression = ['interpolate', ['linear'], ['/', ['get', property], Math.max(1, max)]];
+    const expression = ['interpolate', ['linear'], magnitudeRatio(property, max)];
     for (const [ratio, hex] of HEAT_STOPS) expression.push(ratio, hex);
     return expression;
 }
@@ -42,8 +54,11 @@ function rgbToHex([r, g, b]) {
     return '#' + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
 }
 
+// `ratio` here is the raw (linear) count/max fraction - sqrt matches the
+// same curve magnitudeRatio() applies in the map's own paint expressions,
+// so a sidebar swatch always matches what's drawn on the map.
 function heatColorAt(ratio) {
-    ratio = Math.min(1, Math.max(0, ratio));
+    ratio = Math.sqrt(Math.min(1, Math.max(0, ratio)));
 
     for (let i = 0; i < HEAT_STOPS.length - 1; i++) {
         const [r0, c0] = HEAT_STOPS[i];
@@ -61,7 +76,7 @@ function heatColorAt(ratio) {
 }
 
 function widthExpression(property, max, stops) {
-    const expression = ['interpolate', ['linear'], ['/', ['get', property], Math.max(1, max)]];
+    const expression = ['interpolate', ['linear'], magnitudeRatio(property, max)];
     for (const [ratio, value] of stops) expression.push(ratio, value);
     return expression;
 }
@@ -143,6 +158,15 @@ function clearSelection() {
     renderStats();
 }
 
+function renderRangeToggle() {
+    return `
+        <div id="range-toggle">
+            <button type="button" data-range="all" class="${range === 'all' ? 'active' : ''}">All Time</button>
+            <button type="button" data-range="recent" class="${range === 'recent' ? 'active' : ''}">Last 8 Weeks</button>
+        </div>
+    `;
+}
+
 function renderLegend() {
     return `
         <div id="legend-bar"></div>
@@ -198,7 +222,7 @@ function renderStats() {
     const stats = document.getElementById('stats');
     if (!stats) return;
 
-    stats.innerHTML = selectedIcao ? renderSelectedAirport(selectedIcao) : renderTopCorridors();
+    stats.innerHTML = renderRangeToggle() + (selectedIcao ? renderSelectedAirport(selectedIcao) : renderTopCorridors());
 }
 
 map.on('load', async () => {
@@ -250,6 +274,16 @@ map.on('load', async () => {
     });
 
     document.getElementById('stats')?.addEventListener('click', (e) => {
+        const rangeButton = e.target.closest('#range-toggle button');
+        if (rangeButton) {
+            if (rangeButton.dataset.range !== range) {
+                range = rangeButton.dataset.range;
+                clearSelection();
+                refresh();
+            }
+            return;
+        }
+
         if (e.target.closest('#back-to-top')) {
             e.preventDefault();
             clearSelection();
@@ -274,9 +308,10 @@ map.on('load', async () => {
     });
 
     const refresh = async () => {
+        const urls = RANGE_URLS[range];
         const [airports, routes] = await Promise.all([
-            fetchJson(PAST_AIRPORTS_URL),
-            fetchJson(PAST_ROUTES_URL),
+            fetchJson(urls.airports),
+            fetchJson(urls.routes),
         ]);
 
         airportsData = airports;
