@@ -22,6 +22,10 @@ Route::get('/flights/past/routes', [MapController::class, 'pastRoutes'])->name('
 Route::get('/flights/past/changes', [MapController::class, 'changes'])->name('past-flights.changes');
 Route::post('/flights/past/changes/recalculate', [MapController::class, 'recalculateChanges'])->name('past-flights.changes.recalculate');
 
+Route::get('/flights/recent', [MapController::class, 'recent'])->name('recent');
+Route::get('/flights/recent/airports', [MapController::class, 'recentAirports'])->name('recent.airports');
+Route::get('/flights/recent/routes', [MapController::class, 'recentRoutes'])->name('recent.routes');
+
 Route::get('/flights/heatmap', [MapController::class, 'heatmap'])->name('heatmap');
 
 // Local-only trigger to run the VATSIM ingest on demand without waiting for

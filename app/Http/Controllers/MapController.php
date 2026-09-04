@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CalculateAirportTiers;
 use App\Jobs\RecalculateFlightReroutes;
 use App\Models\Airport;
 use App\Models\Flight;
@@ -9,6 +10,7 @@ use App\Models\FlightSession;
 use App\Services\FirBoundaries;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class MapController extends Controller
@@ -21,6 +23,16 @@ class MapController extends Controller
     public function pastFlights()
     {
         return view('past-flights');
+    }
+
+    /**
+     * Same shape as the All History map, but windowed to the trailing
+     * 8 weeks (the same window CalculateAirportTiers uses) rather than
+     * all-time, and with tier-styled airport icons matching the live map.
+     */
+    public function recent()
+    {
+        return view('recent');
     }
 
     public function heatmap()
@@ -90,7 +102,21 @@ class MapController extends Controller
      */
     public function pastAirports(): JsonResponse
     {
+        return $this->airportStats(null);
+    }
+
+    /**
+     * Same as pastAirports, windowed to the trailing 8 weeks - see recent().
+     */
+    public function recentAirports(): JsonResponse
+    {
+        return $this->airportStats($this->recentSince());
+    }
+
+    private function airportStats(?Carbon $since): JsonResponse
+    {
         $flights = Flight::whereNotNull('dep')->whereNotNull('arr')
+            ->when($since, fn ($q) => $q->where('landed_at', '>=', $since))
             ->get(['dep', 'arr', 'original_dep', 'original_arr']);
 
         $stats = [];
@@ -136,8 +162,22 @@ class MapController extends Controller
      */
     public function pastRoutes(): JsonResponse
     {
+        return $this->routeStats(null);
+    }
+
+    /**
+     * Same as pastRoutes, windowed to the trailing 8 weeks - see recent().
+     */
+    public function recentRoutes(): JsonResponse
+    {
+        return $this->routeStats($this->recentSince());
+    }
+
+    private function routeStats(?Carbon $since): JsonResponse
+    {
         $flights = Flight::whereNotNull('dep')->whereNotNull('arr')
             ->whereColumn('dep', '!=', 'arr')
+            ->when($since, fn ($q) => $q->where('landed_at', '>=', $since))
             ->get(['dep', 'arr', 'original_dep', 'original_arr']);
 
         $routes = [];
@@ -237,6 +277,17 @@ class MapController extends Controller
         RecalculateFlightReroutes::dispatchSync();
 
         return redirect()->route('past-flights.changes')->with('status', 'Reroutes recalculated against the current international destinations list.');
+    }
+
+    /**
+     * The cutoff used by the Recent map - kept in lockstep with
+     * CalculateAirportTiers's own window rather than a separately
+     * hardcoded number, so "recent" always means the same thing as a
+     * airport's tier.
+     */
+    private function recentSince(): Carbon
+    {
+        return Carbon::now()->subWeeks(CalculateAirportTiers::WINDOW_WEEKS);
     }
 
     /**

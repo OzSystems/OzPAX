@@ -25,6 +25,17 @@ export function legendDot(color) {
     return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
 }
 
+// A labelled, divider-topped block within a popup - keeps distinct kinds of
+// information (e.g. tier, traffic, passengers) visually separate instead of
+// all running together as one flat list of lines. Shared across every map's
+// airport popup so they all read the same way.
+export function popupSection(heading, bodyHtml) {
+    return `<div style="margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;">`
+        + `<div style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#64748b;margin-bottom:3px;">${heading}</div>`
+        + bodyHtml
+        + `</div>`;
+}
+
 export function fetchJson(url) {
     return fetch(url).then((res) => res.json());
 }
@@ -33,6 +44,59 @@ export function refreshSource(map, sourceId, url) {
     fetchJson(url)
         .then((data) => map.getSource(sourceId)?.setData(data))
         .catch((err) => console.error(`${sourceId} refresh failed`, err));
+}
+
+// Five clearly distinct hues (not shades of one color) so tiers are easy to
+// tell apart at a glance - ordered like a heat scale, hottest/most
+// important (Tier 1) to coolest/quietest (Tier 5, the vast majority of
+// airports, deliberately muted so the long tail doesn't clutter the map).
+// Shared by every map that shows tier-colored airports, so they always agree.
+export const TIER_COLOR_HEX = { 1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#22c55e', 5: '#64748b' };
+
+export const TIER_COLORS = ['match', ['get', 'tier'],
+    1, TIER_COLOR_HEX[1],
+    2, TIER_COLOR_HEX[2],
+    3, TIER_COLOR_HEX[3],
+    4, TIER_COLOR_HEX[4],
+    5, TIER_COLOR_HEX[5],
+    TIER_COLOR_HEX[5],
+];
+
+// Real-world nautical-mile radius per tier.
+const TIER_RADIUS_NM = ['match', ['get', 'tier'],
+    1, 25,
+    2, 15,
+    3, 12,
+    4, 11,
+    5, 8,
+    8,
+];
+
+// Ground resolution at zoom 20 is ~0.075m/pixel at the equator; dividing by
+// cos(latitude) corrects for Web Mercator's north/south stretching. Feeding
+// that into a base-2 exponential zoom interpolation from (0, 0) makes the
+// circle represent a constant real-world size (the tier's nm radius) at any
+// zoom or latitude, rather than a flat pixel radius that never matches the
+// map's actual scale as you zoom in or out. Needs each feature to carry its
+// latitude as a plain 'lat' property (style expressions can't read it out of
+// the geometry) - see attachLatProperty() below.
+const NM_IN_METERS = 1852;
+const GROUND_RES_AT_Z20 = 0.075;
+const TIER_RADIUS_METERS = ['*', NM_IN_METERS, TIER_RADIUS_NM];
+const TIER_RADIUS_PX_AT_Z20 = ['/', TIER_RADIUS_METERS, ['*', GROUND_RES_AT_Z20, ['cos', ['*', ['get', 'lat'], Math.PI / 180]]]];
+export const TIER_RADIUS_EXPRESSION = ['interpolate', ['exponential', 2], ['zoom'], 0, 0, 20, TIER_RADIUS_PX_AT_Z20];
+
+// TIER_RADIUS_EXPRESSION needs each feature's latitude directly as a
+// property - call this on a FeatureCollection before handing it to
+// map.getSource(...).setData().
+export function attachLatProperty(collection) {
+    return {
+        ...collection,
+        features: collection.features.map((f) => ({
+            ...f,
+            properties: { ...f.properties, lat: f.geometry.coordinates[1] },
+        })),
+    };
 }
 
 /**

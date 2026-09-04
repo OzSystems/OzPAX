@@ -5,7 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="mapbox-token" content="{{ config('services.mapbox.token') }}">
 
-        <title>{{ config('app.name', 'OzPAX') }} &mdash; Past Flights</title>
+        <title>{{ config('app.name', 'OzPAX') }} &mdash; All History</title>
 
         <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
         <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
@@ -117,7 +117,8 @@
 
         <nav id="map-nav">
             <a href="{{ route('live') }}">Live</a>
-            <a href="{{ route('past-flights') }}" class="active">Past</a>
+            <a href="{{ route('past-flights') }}" class="active">All History</a>
+            <a href="{{ route('recent') }}">Last 8 Weeks</a>
             <a href="{{ route('heatmap') }}">Heatmap</a>
         </nav>
 

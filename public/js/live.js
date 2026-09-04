@@ -1,4 +1,8 @@
-import { createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson, DEPARTURE_COLOR, ARRIVAL_COLOR, legendDot } from './map-base.js';
+import {
+    createMap, emptyCollection, addAirportsLayer, addFirBoundariesLayer, fetchJson,
+    DEPARTURE_COLOR, ARRIVAL_COLOR, legendDot, popupSection,
+    TIER_COLOR_HEX, TIER_COLORS, TIER_RADIUS_EXPRESSION, attachLatProperty,
+} from './map-base.js';
 
 const LIVE_FLIGHTS_URL = '/flights/live/flights';
 const LIVE_AIRPORTS_URL = '/flights/live/airports';
@@ -159,16 +163,6 @@ function clearSelection() {
     applySelection();
 }
 
-// A labelled, divider-topped block within a popup - keeps distinct kinds of
-// information (tier, live traffic, passengers) visually separate instead of
-// all running together as one flat list of lines.
-function popupSection(heading, bodyHtml) {
-    return `<div style="margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;">`
-        + `<div style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#64748b;margin-bottom:3px;">${heading}</div>`
-        + bodyHtml
-        + `</div>`;
-}
-
 function airportPopupHtml(p) {
     const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
     const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
@@ -225,51 +219,15 @@ function renderStats() {
     `;
 }
 
-// Five clearly distinct hues (not shades of one color) so tiers are easy to
-// tell apart at a glance - ordered like a heat scale, hottest/most
-// important (Tier 1) to coolest/quietest (Tier 5, the vast majority of
-// airports, deliberately muted so the long tail doesn't clutter the map).
-const TIER_COLOR_HEX = { 1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#22c55e', 5: '#64748b' };
-const TIER_COLORS = ['match', ['get', 'tier'],
-    1, TIER_COLOR_HEX[1],
-    2, TIER_COLOR_HEX[2],
-    3, TIER_COLOR_HEX[3],
-    4, TIER_COLOR_HEX[4],
-    5, TIER_COLOR_HEX[5],
-    TIER_COLOR_HEX[5],
-];
-
-// Real-world nautical-mile radius per tier.
-const TIER_RADIUS_NM = ['match', ['get', 'tier'],
-    1, 25,
-    2, 15,
-    3, 12,
-    4, 11,
-    5, 8,
-    8,
-];
-
-// Ground resolution at zoom 20 is ~0.075m/pixel at the equator; dividing by
-// cos(latitude) corrects for Web Mercator's north/south stretching. Feeding
-// that into a base-2 exponential zoom interpolation from (0, 0) makes the
-// circle represent a constant real-world size (the tier's nm radius) at any
-// zoom or latitude, rather than a flat pixel radius that never matches the
-// map's actual scale as you zoom in or out.
-const NM_IN_METERS = 1852;
-const GROUND_RES_AT_Z20 = 0.075;
-const AIRPORT_RADIUS_METERS = ['*', NM_IN_METERS, TIER_RADIUS_NM];
-const AIRPORT_RADIUS_PX_AT_Z20 = ['/', AIRPORT_RADIUS_METERS, ['*', GROUND_RES_AT_Z20, ['cos', ['*', ['get', 'lat'], Math.PI / 180]]]];
-const AIRPORT_RADIUS_EXPRESSION = ['interpolate', ['exponential', 2], ['zoom'], 0, 0, 20, AIRPORT_RADIUS_PX_AT_Z20];
-
 map.on('load', async () => {
     addFirBoundariesLayer(map);
 
     addAirportsLayer(map, {
         onClick: (feature) => selectAirport(feature.properties.icao),
         popupHtml: airportPopupHtml,
-        // A fixed real-world radius (5nm-20nm depending on tier) rather
-        // than a flat pixel size - see AIRPORT_RADIUS_EXPRESSION above.
-        radiusExpression: AIRPORT_RADIUS_EXPRESSION,
+        // A fixed real-world radius (tier-dependent) rather than a flat
+        // pixel size - see TIER_RADIUS_EXPRESSION in map-base.js.
+        radiusExpression: TIER_RADIUS_EXPRESSION,
         colorExpression: TIER_COLORS,
     });
 
@@ -339,15 +297,7 @@ map.on('load', async () => {
         ]);
 
         flightsData = flights;
-        // AIRPORT_RADIUS_EXPRESSION needs each feature's latitude directly as
-        // a property (style expressions can't read it out of the geometry).
-        airportsData = {
-            ...airports,
-            features: airports.features.map((f) => ({
-                ...f,
-                properties: { ...f.properties, lat: f.geometry.coordinates[1] },
-            })),
-        };
+        airportsData = attachLatProperty(airports);
 
         map.getSource('live-flights')?.setData(flightsData);
         map.getSource('airports')?.setData(airportsData);

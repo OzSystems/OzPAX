@@ -28,8 +28,10 @@ class CalculateAirportTiers implements ShouldQueue
     // gateways, regardless of their movement count.
     private const TIER_1_ICAOS = ['YMML', 'YSSY', 'YBBN', 'YPPH'];
 
-    // The trailing window, in weeks, that movements are summed over.
-    private const WINDOW_WEEKS = 8;
+    // The trailing window, in weeks, that movements are summed over. Public
+    // so other places needing the same "recent" window (e.g. the Recent map)
+    // can stay in sync with this without duplicating the number.
+    public const WINDOW_WEEKS = 8;
 
     // Minimum 8-week movement count (departures + arrivals) to qualify for
     // each tier - edit these numbers to retune the tiers. Checked top to
