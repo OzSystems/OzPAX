@@ -32,7 +32,9 @@
                 padding: 10px 14px;
                 border-radius: 6px;
                 font: 13px system-ui, sans-serif;
-                min-width: 170px;
+                min-width: 190px;
+                max-height: calc(100vh - 24px);
+                overflow-y: auto;
             }
 
             #stats .heading {

@@ -1,10 +1,12 @@
 <?php
 
-namespace App\Console\Commands;
+namespace App\Jobs;
 
 use App\Models\Airport;
 use App\Services\FirBoundaries;
-use Illuminate\Console\Command;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Airports resolved on the fly via Airlabs (see RecordVatsimFlights::resolveAirport)
@@ -13,13 +15,15 @@ use Illuminate\Console\Command;
  * real is_vatpac/fir_code. This one-off sweep re-checks every such airport's
  * coordinates against the VATPAC FIR boundaries and fixes the flag/fir_code.
  */
-class ReclassifyVatpacAirports extends Command
+class ReclassifyVatpacAirports implements ShouldQueue
 {
-    protected $signature = 'airports:reclassify-vatpac';
+    use Queueable;
 
-    protected $description = 'Re-check Airlabs-resolved airports (no VATSpy fir_code) against the VATPAC FIR boundaries and fix is_vatpac/fir_code';
+    public $timeout = 120;
 
-    public function handle(FirBoundaries $firBoundaries): int
+    public $tries = 1;
+
+    public function handle(FirBoundaries $firBoundaries): void
     {
         $airports = Airport::whereNull('fir_code')->get();
         $changed = 0;
@@ -42,11 +46,13 @@ class ReclassifyVatpacAirports extends Command
             $airport->save();
             $changed++;
 
-            $this->line("{$airport->icao}: is_vatpac=".($shouldBeVatpac ? 'true' : 'false').($fir ? " ({$fir})" : ''));
+            Log::info('ReclassifyVatpacAirports: '.$airport->icao.' is_vatpac='.($shouldBeVatpac ? 'true' : 'false').($fir ? " ({$fir})" : ''));
         }
 
-        $this->info("Checked {$airports->count()} Airlabs-resolved airports, reclassified {$changed}.");
-
-        return self::SUCCESS;
+        Log::info(sprintf(
+            'ReclassifyVatpacAirports: checked %d Airlabs-resolved airports, reclassified %d.',
+            $airports->count(),
+            $changed
+        ));
     }
 }

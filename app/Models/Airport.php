@@ -16,6 +16,9 @@ class Airport extends Model
         'fir_code',
         'is_vatpac',
         'is_pseudo',
+        'movements_8w',
+        'tier',
+        'tier_calculated_at',
     ];
 
     protected $casts = [
@@ -24,5 +27,8 @@ class Airport extends Model
         'altitude' => 'integer',
         'is_vatpac' => 'boolean',
         'is_pseudo' => 'boolean',
+        'movements_8w' => 'integer',
+        'tier' => 'integer',
+        'tier_calculated_at' => 'datetime',
     ];
 }

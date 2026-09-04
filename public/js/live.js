@@ -164,6 +164,7 @@ function airportPopupHtml(p) {
     const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
 
     return `<strong>${p.icao}</strong> — ${p.name}<br>`
+        + `${legendDot(TIER_COLOR_HEX[p.tier] ?? TIER_COLOR_HEX[5])}Tier ${p.tier} (${p.movements_8w ?? 0} movements/8wk)<br>`
         + `${legendDot(DEPARTURE_COLOR)}Departures: ${p.departures}${depNote}<br>`
         + `${legendDot(ARRIVAL_COLOR)}Arrivals: ${p.arrivals}${arrNote}<br>`
         + `Total: ${p.total}`;
@@ -187,30 +188,64 @@ function renderStats() {
 
     const topAirports = [...airportsData.features]
         .sort((a, b) => b.properties.total - a.properties.total)
-        .slice(0, 5);
+        .slice(0, 30);
 
+    // Deliberately no tier color here - this list ranks *live* traffic right
+    // now, a different signal from the 8-week tier, so it gets its own
+    // plain style rather than borrowing the tier legend's colors.
     const rows = topAirports.length
         ? topAirports.map((f) => `<div class="row"><span>${f.properties.icao}</span><span>${f.properties.total}</span></div>`).join('')
         : '<div class="row"><span>—</span></div>';
 
+    const tierRows = [1, 2, 3, 4, 5]
+        .map((tier) => `<div class="row"><span>${legendDot(TIER_COLOR_HEX[tier])}Tier ${tier}</span></div>`)
+        .join('');
+
     stats.innerHTML = `
         <div class="row"><span>Tracked aircraft</span><span>${trackedCount}</span></div>
-        <div class="heading">Top 5 airport movements</div>
+        <div class="heading">Airport tiers (8-week movements)</div>
+        ${tierRows}
+        <div class="heading">Top 30 airport movements</div>
         ${rows}
     `;
 }
 
+// Five clearly distinct hues (not shades of one color) so tiers are easy to
+// tell apart at a glance - ordered like a heat scale, hottest/most
+// important (Tier 1) to coolest/quietest (Tier 5, the vast majority of
+// airports, deliberately muted so the long tail doesn't clutter the map).
+const TIER_COLOR_HEX = { 1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#22c55e', 5: '#64748b' };
+const TIER_COLORS = ['match', ['get', 'tier'],
+    1, TIER_COLOR_HEX[1],
+    2, TIER_COLOR_HEX[2],
+    3, TIER_COLOR_HEX[3],
+    4, TIER_COLOR_HEX[4],
+    5, TIER_COLOR_HEX[5],
+    TIER_COLOR_HEX[5],
+];
+
+// Real-world nautical-mile radius per tier - 30nm max at Tier 1, stepping
+// down 4nm per tier; Tier 5 is floored to 10nm rather than continuing the
+// same step, since it covers the vast majority of airports and would
+// otherwise swamp the map.
+const TIER_RADIUS_NM = ['match', ['get', 'tier'],
+    1, 30,
+    2, 26,
+    3, 22,
+    4, 18,
+    5, 10,
+    10,
+];
+
 // Ground resolution at zoom 20 is ~0.075m/pixel at the equator; dividing by
 // cos(latitude) corrects for Web Mercator's north/south stretching. Feeding
 // that into a base-2 exponential zoom interpolation from (0, 0) makes the
-// circle represent a constant real-world size (up to the 10nm cap) at any
+// circle represent a constant real-world size (the tier's nm radius) at any
 // zoom or latitude, rather than a flat pixel radius that never matches the
 // map's actual scale as you zoom in or out.
 const NM_IN_METERS = 1852;
 const GROUND_RES_AT_Z20 = 0.075;
-const AIRPORT_RADIUS_METERS = ['*', NM_IN_METERS, ['interpolate', ['linear'], ['get', 'total'],
-    1, 0.5, 5, 1, 10, 2, 30, 4, 80, 7, 150, 10,
-]];
+const AIRPORT_RADIUS_METERS = ['*', NM_IN_METERS, TIER_RADIUS_NM];
 const AIRPORT_RADIUS_PX_AT_Z20 = ['/', AIRPORT_RADIUS_METERS, ['*', GROUND_RES_AT_Z20, ['cos', ['*', ['get', 'lat'], Math.PI / 180]]]];
 const AIRPORT_RADIUS_EXPRESSION = ['interpolate', ['exponential', 2], ['zoom'], 0, 0, 20, AIRPORT_RADIUS_PX_AT_Z20];
 
@@ -220,11 +255,10 @@ map.on('load', async () => {
     addAirportsLayer(map, {
         onClick: (feature) => selectAirport(feature.properties.icao),
         popupHtml: airportPopupHtml,
-        // A fixed real-world radius (0.5nm-10nm depending on traffic) rather
+        // A fixed real-world radius (5nm-20nm depending on tier) rather
         // than a flat pixel size - see AIRPORT_RADIUS_EXPRESSION above.
         radiusExpression: AIRPORT_RADIUS_EXPRESSION,
-        // Blue (1-10) -> light orange (11-30) -> dark orange (31-80) -> red (80-150+).
-        colorExpression: ['step', ['get', 'total'], '#38bdf8', 11, '#fb923c', 31, '#c2410c', 80, '#dc2626'],
+        colorExpression: TIER_COLORS,
     });
 
     map.addSource('airport-links', { type: 'geojson', data: emptyCollection() });

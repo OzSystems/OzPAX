@@ -249,7 +249,7 @@ class MapController extends Controller
         // set by RecordVatsimFlights::resolveAirport() - exclude those.
         return Airport::whereIn('icao', $icaos)
             ->where(fn ($q) => $q->where('lat', '!=', 0)->orWhere('lon', '!=', 0))
-            ->get(['icao', 'name', 'lat', 'lon']);
+            ->get(['icao', 'name', 'lat', 'lon', 'tier', 'movements_8w']);
     }
 
     /**
@@ -274,7 +274,12 @@ class MapController extends Controller
                 'type' => 'Point',
                 'coordinates' => [(float) $airport->lon, (float) $airport->lat],
             ],
-            'properties' => array_merge(['icao' => $airport->icao, 'name' => $airport->name], $properties),
+            'properties' => array_merge([
+                'icao' => $airport->icao,
+                'name' => $airport->name,
+                'tier' => $airport->tier,
+                'movements_8w' => $airport->movements_8w,
+            ], $properties),
         ];
     }
 
