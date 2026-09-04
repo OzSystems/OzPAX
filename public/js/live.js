@@ -159,15 +159,30 @@ function clearSelection() {
     applySelection();
 }
 
+// A labelled, divider-topped block within a popup - keeps distinct kinds of
+// information (tier, live traffic, passengers) visually separate instead of
+// all running together as one flat list of lines.
+function popupSection(heading, bodyHtml) {
+    return `<div style="margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;">`
+        + `<div style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#64748b;margin-bottom:3px;">${heading}</div>`
+        + bodyHtml
+        + `</div>`;
+}
+
 function airportPopupHtml(p) {
     const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
     const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
+    const tierColor = TIER_COLOR_HEX[p.tier] ?? TIER_COLOR_HEX[5];
 
-    return `<strong>${p.icao}</strong> — ${p.name}<br>`
-        + `${legendDot(TIER_COLOR_HEX[p.tier] ?? TIER_COLOR_HEX[5])}Tier ${p.tier} (${p.movements_8w ?? 0} movements/8wk)<br>`
-        + `${legendDot(DEPARTURE_COLOR)}Departures: ${p.departures}${depNote}<br>`
-        + `${legendDot(ARRIVAL_COLOR)}Arrivals: ${p.arrivals}${arrNote}<br>`
-        + `Total: ${p.total}`;
+    return `<strong>${p.icao}</strong> — ${p.name}`
+        + popupSection('Tier', `${legendDot(tierColor)}Tier ${p.tier} <span style="color:#64748b;">(${p.movements_8w ?? 0} movements/8wk)</span>`)
+        + popupSection('Traffic now', ''
+            + `${legendDot(DEPARTURE_COLOR)}Departures: ${p.departures}${depNote}<br>`
+            + `${legendDot(ARRIVAL_COLOR)}Arrivals: ${p.arrivals}${arrNote}<br>`
+            + `Total: ${p.total}`)
+        // Itinerary generation doesn't exist yet - this is a placeholder
+        // section ready for real passenger counts once it does.
+        + popupSection('Passengers', `<span style="color:#64748b;">Passenger itineraries coming soon</span>`);
 }
 
 function aircraftPopupHtml(p) {
@@ -224,17 +239,14 @@ const TIER_COLORS = ['match', ['get', 'tier'],
     TIER_COLOR_HEX[5],
 ];
 
-// Real-world nautical-mile radius per tier - 30nm max at Tier 1, stepping
-// down 4nm per tier; Tier 5 is floored to 10nm rather than continuing the
-// same step, since it covers the vast majority of airports and would
-// otherwise swamp the map.
+// Real-world nautical-mile radius per tier.
 const TIER_RADIUS_NM = ['match', ['get', 'tier'],
-    1, 30,
-    2, 26,
-    3, 22,
-    4, 18,
-    5, 10,
-    10,
+    1, 25,
+    2, 15,
+    3, 12,
+    4, 11,
+    5, 8,
+    8,
 ];
 
 // Ground resolution at zoom 20 is ~0.075m/pixel at the equator; dividing by
