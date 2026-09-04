@@ -48,12 +48,13 @@ class RecordVatsimFlights implements ShouldQueue
         $pilots = $vatsimClient->getPilots();
 
         $vatpacIcaos = Airport::where('is_vatpac', true)->pluck('icao')->flip();
-        $airportRecords = Airport::all(['icao', 'lat', 'lon', 'altitude'])
+        $airportRecords = Airport::all(['icao', 'lat', 'lon', 'altitude', 'altitude_checked_at'])
             ->keyBy('icao')
             ->map(fn (Airport $a) => [
                 'lat' => (float) $a->lat,
                 'lon' => (float) $a->lon,
                 'altitude' => $a->altitude,
+                'altitude_checked_at' => $a->altitude_checked_at,
             ])
             ->toArray();
 
@@ -180,6 +181,13 @@ class RecordVatsimFlights implements ShouldQueue
         $session->save();
     }
 
+    // If Airlabs has already been asked about an airport within this many
+    // days and still came back with no altitude, don't ask again yet - stops
+    // an airport Airlabs simply has no data for from being re-queried on
+    // every single poll forever. Still retried eventually, in case Airlabs'
+    // coverage improves or the ICAO was a transient typo.
+    private const ALTITUDE_RETRY_AFTER_DAYS = 30;
+
     /**
      * Backfill an airport from Airlabs when it's completely unknown, or when
      * we already know it but are missing its runway elevation. Existing
@@ -189,7 +197,7 @@ class RecordVatsimFlights implements ShouldQueue
      * determined geometrically, since it's by definition not in VATSpy (that's
      * the only reason we're resolving it via Airlabs at all).
      *
-     * @param  array<string, array{lat: float, lon: float, altitude: ?int}>  $airportRecords
+     * @param  array<string, array{lat: float, lon: float, altitude: ?int, altitude_checked_at: ?Carbon}>  $airportRecords
      * @param  array<string, true>  $resolvedThisRun
      */
     private function resolveAirport(?string $icao, array &$airportRecords, array &$resolvedThisRun, AirlabsClient $airlabsClient, FirBoundaries $firBoundaries): void
@@ -200,15 +208,35 @@ class RecordVatsimFlights implements ShouldQueue
 
         $existing = $airportRecords[$icao] ?? null;
 
-        if ($existing !== null && $existing['altitude'] !== null) {
+        if ($existing !== null && ($existing['altitude'] !== null || $this->checkedRecently($existing['altitude_checked_at']))) {
             return;
         }
 
         $resolvedThisRun[$icao] = true;
+        $checkedAt = Carbon::now('UTC');
 
         $data = $airlabsClient->connectData($icao);
 
         if (! $data) {
+            // Stamp the attempt even on failure/no-match, so an ICAO Airlabs
+            // has never heard of doesn't get retried every single poll.
+            if ($existing !== null) {
+                Airport::where('icao', $icao)->update(['altitude_checked_at' => $checkedAt]);
+                $airportRecords[$icao]['altitude_checked_at'] = $checkedAt;
+            } else {
+                Airport::create([
+                    'icao' => $icao,
+                    'name' => $icao,
+                    'lat' => 0,
+                    'lon' => 0,
+                    'is_vatpac' => false,
+                    'is_pseudo' => false,
+                    'altitude_checked_at' => $checkedAt,
+                ]);
+
+                $airportRecords[$icao] = ['lat' => 0.0, 'lon' => 0.0, 'altitude' => null, 'altitude_checked_at' => $checkedAt];
+            }
+
             return;
         }
 
@@ -219,11 +247,10 @@ class RecordVatsimFlights implements ShouldQueue
             'lon' => isset($data['lng']) ? (float) $data['lng'] : null,
             'altitude' => isset($data['alt']) ? (int) round((float) $data['alt']) : null,
         ], fn ($value) => $value !== null);
+        $attributes['altitude_checked_at'] = $checkedAt;
 
         if ($existing !== null) {
-            if ($attributes !== []) {
-                Airport::where('icao', $icao)->update($attributes);
-            }
+            Airport::where('icao', $icao)->update($attributes);
         } else {
             $fir = isset($attributes['lat'], $attributes['lon'])
                 ? $firBoundaries->findVatpacFir($attributes['lat'], $attributes['lon'])
@@ -240,13 +267,19 @@ class RecordVatsimFlights implements ShouldQueue
             ], $attributes));
         }
 
-        $airport = Airport::where('icao', $icao)->first(['lat', 'lon', 'altitude']);
+        $airport = Airport::where('icao', $icao)->first(['lat', 'lon', 'altitude', 'altitude_checked_at']);
 
         $airportRecords[$icao] = [
             'lat' => (float) $airport->lat,
             'lon' => (float) $airport->lon,
             'altitude' => $airport->altitude,
+            'altitude_checked_at' => $airport->altitude_checked_at,
         ];
+    }
+
+    private function checkedRecently(?Carbon $checkedAt): bool
+    {
+        return $checkedAt !== null && $checkedAt->gt(Carbon::now('UTC')->subDays(self::ALTITUDE_RETRY_AFTER_DAYS));
     }
 
     private function recordCompletedFlight(
