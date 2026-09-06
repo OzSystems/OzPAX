@@ -39,9 +39,9 @@ class CalculateAirportTiers implements ShouldQueue
     // exceeds. Tier 1 isn't listed here - it's the reserved airports above,
     // regardless of movement count. Anything below TIER_5 is impossible
     // (0 is the floor), so tier 5 is simply "didn't qualify for 2-4".
-    private const TIER_2_MIN_MOVEMENTS = 500;
+    private const TIER_2_MIN_MOVEMENTS = 600;
 
-    private const TIER_3_MIN_MOVEMENTS = 200;
+    private const TIER_3_MIN_MOVEMENTS = 100;
 
     private const TIER_4_MIN_MOVEMENTS = 20;
 

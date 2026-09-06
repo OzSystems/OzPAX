@@ -128,6 +128,14 @@ export function addFirBoundariesLayer(map) {
  * (historic totals) - only the data feeding the source (and, optionally, the
  * radius scale) differs.
  */
+// Screen-space (not geographic) distance, used to disambiguate overlapping
+// circles at a click point - see addAirportsLayer's click handler.
+function pixelDistanceToPoint(map, point, lngLat) {
+    const projected = map.project(lngLat);
+
+    return Math.hypot(projected.x - point.x, projected.y - point.y);
+}
+
 function defaultAirportPopupHtml(p) {
     const depNote = p.departuresRerouted ? ` (${p.departuresRerouted} rerouted here)` : '';
     const arrNote = p.arrivalsRerouted ? ` (${p.arrivalsRerouted} rerouted here)` : '';
@@ -179,7 +187,28 @@ export function addAirportsLayer(map, { onClick, radiusStops, radiusExpression, 
     const interactiveLayers = ['airports-circles', 'airports-labels'];
 
     map.on('click', interactiveLayers, (e) => {
-        const feature = e.features[0];
+        // On the live map an aircraft icon can sit directly over an airport
+        // circle (e.g. parked right at the field). When that layer exists,
+        // let a hit there take priority - only one popup should ever open
+        // for a single click. Harmless no-op on pages with no aircraft layer.
+        if (map.getLayer('live-flights-symbols') && map.queryRenderedFeatures(e.point, { layers: ['live-flights-symbols'] }).length > 0) {
+            return;
+        }
+
+        // Tier 1's circle radius (TIER_RADIUS_EXPRESSION) is real-world-sized
+        // and large enough to fully cover nearby lower-tier airports, so a
+        // click meant for the small airport underneath still matches both
+        // circles - e.features is topmost-paint-order-first, which is
+        // whichever was drawn last, not necessarily the one closest to the
+        // actual click. Picking by on-screen distance to each candidate's
+        // own center instead means a click landing inside a small airport's
+        // dot always resolves to that airport, even with a giant Tier 1
+        // circle also covering the same pixel.
+        const feature = e.features.reduce((closest, candidate) => {
+            const distance = pixelDistanceToPoint(map, e.point, candidate.geometry.coordinates);
+
+            return distance < closest.distance ? { feature: candidate, distance } : closest;
+        }, { feature: e.features[0], distance: pixelDistanceToPoint(map, e.point, e.features[0].geometry.coordinates) }).feature;
 
         new mapboxgl.Popup()
             .setLngLat(feature.geometry.coordinates)

@@ -109,14 +109,20 @@ function renderTopAirports() {
 
     const rows = top.length
         ? top.map((f) => (
-            `<div class="row">`
-            + `<a href="#" class="icao" data-icao="${f.properties.icao}">${f.properties.icao}</a>`
-            + `<span class="counts">${f.properties.departures} dep / ${f.properties.arrivals} arr</span>`
-            + `</div>`
+            `<tr>`
+            + `<td><a href="#" class="icao" data-icao="${f.properties.icao}">${f.properties.icao}</a></td>`
+            + `<td>${f.properties.departures}</td>`
+            + `<td>${f.properties.arrivals}</td>`
+            + `<td>${f.properties.total}</td>`
+            + `</tr>`
         )).join('')
-        : '<div class="row"><span>—</span></div>';
+        : '<tr><td colspan="4">—</td></tr>';
 
-    return `<div class="heading">Top 30 airports</div>${rows}`;
+    return `<div class="heading">Top 30 airports</div>`
+        + `<table class="top-airports">`
+        + `<thead><tr><th></th><th>Dep</th><th>Arr</th><th>Total</th></tr></thead>`
+        + `<tbody>${rows}</tbody>`
+        + `</table>`;
 }
 
 /**

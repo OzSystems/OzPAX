@@ -32,7 +32,7 @@
                 padding: 10px 14px;
                 border-radius: 6px;
                 font: 13px system-ui, sans-serif;
-                min-width: 220px;
+                width: 220px;
                 max-height: calc(100vh - 24px);
                 overflow-y: auto;
             }
@@ -57,6 +57,37 @@
             #stats .row .counts {
                 color: #94a3b8;
                 font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+
+            #stats table.top-airports {
+                width: 100%;
+                table-layout: fixed;
+                border-collapse: collapse;
+                font-variant-numeric: tabular-nums;
+            }
+
+            #stats table.top-airports th,
+            #stats table.top-airports td {
+                width: 25%;
+                text-align: center;
+            }
+
+            #stats table.top-airports th:first-child,
+            #stats table.top-airports td:first-child {
+                text-align: left;
+            }
+
+            #stats table.top-airports th {
+                color: #64748b;
+                font-weight: 500;
+                font-size: 11px;
+                padding: 0 0 4px;
+            }
+
+            #stats table.top-airports td {
+                color: #94a3b8;
+                line-height: 1.7;
                 white-space: nowrap;
             }
 

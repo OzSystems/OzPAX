@@ -307,6 +307,7 @@
 
         <footer>
             &copy; Joshua Micallef, {{ date('Y') }} OzPAX &mdash; an independent community project for the VATSIM network.
+            &mdash; <a href="{{ route('credits') }}">Credits</a>
         </footer>
     </body>
 </html>

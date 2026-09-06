@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Airport;
 use App\Models\InternationalDestination;
+use App\Support\GreatCircle;
 
 /**
  * Reroutes a non-VATPAC dep/arr airport to the nearest curated
@@ -57,7 +58,7 @@ class InternationalDestinationRouter
         $nearestDistance = null;
 
         foreach ($this->destinations as $destIcao => $destCoords) {
-            $distance = self::distanceNm($coords['lat'], $coords['lon'], $destCoords['lat'], $destCoords['lon']);
+            $distance = GreatCircle::distanceNm($coords['lat'], $coords['lon'], $destCoords['lat'], $destCoords['lon']);
 
             if ($nearestDistance === null || $distance < $nearestDistance) {
                 $nearestDistance = $distance;
@@ -66,20 +67,5 @@ class InternationalDestinationRouter
         }
 
         return $nearestIcao ?? $icao;
-    }
-
-    private static function distanceNm(float $lat1, float $lon1, float $lat2, float $lon2): float
-    {
-        $earthRadiusNm = 3440.065;
-
-        $latDelta = deg2rad($lat2 - $lat1);
-        $lonDelta = deg2rad($lon2 - $lon1);
-
-        $a = sin($latDelta / 2) ** 2
-            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($lonDelta / 2) ** 2;
-
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-
-        return $earthRadiusNm * $c;
     }
 }

@@ -1,18 +1,24 @@
 <?php
 
 use App\Jobs\CalculateAirportTiers;
+use App\Jobs\ExpireStrandedPassengers;
+use App\Jobs\GeneratePassengerItineraries;
 use App\Jobs\RecordVatsimFlights;
 use App\Jobs\SyncAirports;
+use App\Jobs\TopUpPassengerNamePool;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
 
+// VATSIM Flight Data
 Schedule::job(new RecordVatsimFlights)->everyFifteenSeconds();
+
+// Airport Info
 Schedule::job(new SyncAirports)->daily();
 
-// Rolling 8-week traffic tiers, recalculated weekly - see CalculateAirportTiers.
-Schedule::job(new CalculateAirportTiers)->weeklyOn(5, '00:06');
+// Passenger Itinirary
+Schedule::job(new TopUpPassengerNamePool)->hourlyAt('13');
+Schedule::job(new CalculateAirportTiers)->hourlyAt('14');
+Schedule::job(new ExpireStrandedPassengers)->hourlyAt('14');
+Schedule::job(new GeneratePassengerItineraries)->hourlyAt('15');

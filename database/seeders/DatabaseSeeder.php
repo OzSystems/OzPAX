@@ -24,5 +24,6 @@ class DatabaseSeeder extends Seeder
 
         $this->call(AircraftTypeSeeder::class);
         $this->call(InternationalDestinationSeeder::class);
+        $this->call(InternationalGatewaySeeder::class);
     }
 }
