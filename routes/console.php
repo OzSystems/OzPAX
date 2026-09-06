@@ -18,7 +18,7 @@ Schedule::job(new RecordVatsimFlights)->everyFifteenSeconds();
 Schedule::job(new SyncAirports)->daily();
 
 // Passenger Itinirary
-Schedule::job(new TopUpPassengerNamePool)->hourlyAt('13');
-Schedule::job(new CalculateAirportTiers)->hourlyAt('14');
-Schedule::job(new ExpireStrandedPassengers)->hourlyAt('14');
-Schedule::job(new GeneratePassengerItineraries)->hourlyAt('15');
+Schedule::job(new TopUpPassengerNamePool)->hourlyAt('18');
+Schedule::job(new CalculateAirportTiers)->hourlyAt('19');
+Schedule::job(new ExpireStrandedPassengers)->hourlyAt('20');
+Schedule::job(new GeneratePassengerItineraries)->hourlyAt('20');
