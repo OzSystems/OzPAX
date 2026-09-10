@@ -141,7 +141,7 @@ return [
     // circle) from its origin - a few nautical miles isn't a realistic air-
     // travel trip, it's noise from two nearby fields both touching the
     // traffic graph.
-    'min_itinerary_distance_nm' => 30,
+    'min_itinerary_distance_nm' => 110,
 
     // No individual flight leg under this great-circle distance (nm) is
     // ever added to the traffic graph - see
