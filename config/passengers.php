@@ -7,7 +7,15 @@ return [
     // destination only "reachable" via a longer chain of historical
     // connections isn't a realistic itinerary. hop_distribution below is
     // keyed 1..this value, so raising or lowering it changes how many
-    // buckets there are to target.
+    // buckets there are to target. Also enforced directly by
+    // PassengerBoardingEngine as a hard cap on a passenger's cumulative
+    // REAL flights taken so far on their current itinerary (see
+    // handleBoardingLock's $legsTakenByPassenger) - without this, a
+    // passenger who keeps finding a real (but ultimately wrong-direction)
+    // connection at every single stop could rack up far more actual
+    // flights than any planned route ever considered, since each boarding
+    // decision only ever looks one hop ahead and has no memory of how many
+    // hops already happened.
     'max_hops' => 3,
 
     // An airport numerically ABOVE this tier (i.e. quieter than it) is
@@ -134,6 +142,17 @@ return [
     // travel trip, it's noise from two nearby fields both touching the
     // traffic graph.
     'min_itinerary_distance_nm' => 30,
+
+    // No individual flight leg under this great-circle distance (nm) is
+    // ever added to the traffic graph - see
+    // TrafficGraphService::computeEdgeWeights. Unlike min_itinerary_distance_nm
+    // above (which only gates an itinerary's overall origin-to-final-
+    // destination distance at generation time), this applies to every edge
+    // unconditionally, including a path's direct/first leg, since a short
+    // hop like YBCG->YBBN (~60nm) isn't a real passenger flight regardless
+    // of whether it's flown direct or used as a connection - e.g.
+    // YSSY->YSCB (~130nm) remains valid, YBCG->YBBN does not.
+    'min_flight_distance_nm' => 110,
 
     // Airport name substrings (case-insensitive) that disqualify an airport
     // from ever originating OR receiving an itinerary, regardless of tier,

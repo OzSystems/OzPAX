@@ -93,11 +93,23 @@ class PassengerBoardingEngine
         $internationalIcaos = InternationalDestination::pluck('icao')->flip()->all();
         $airportTiers = Airport::pluck('tier', 'icao');
 
+        // How many real flights each waiting passenger has already taken on
+        // their CURRENT itinerary - see resolvePreferredCandidate's
+        // max_hops cap. A fresh batched count rather than a stored counter:
+        // passenger_flight_history is the only durable record of this (see
+        // handleLegCompleted's origin_icao docblock), and a passenger row is
+        // never reused across itineraries, so a plain per-passenger count is
+        // always exactly the current itinerary's leg count.
+        $legsTakenByPassenger = PassengerFlightHistory::whereIn('passenger_id', $waiting->pluck('id'))
+            ->select('passenger_id', DB::raw('count(*) as legs'))
+            ->groupBy('passenger_id')
+            ->pluck('legs', 'passenger_id');
+
         $terminusMatches = new Collection;
         $connections = new Collection;
 
         foreach ($waiting as $passenger) {
-            $pick = $this->resolvePreferredCandidate($passenger, $candidates, $graphExcludingOrigin, $internationalIcaos, $airportTiers);
+            $pick = $this->resolvePreferredCandidate($passenger, $candidates, $graphExcludingOrigin, $internationalIcaos, $airportTiers, $legsTakenByPassenger);
 
             if ($pick === null || $pick['session_id'] !== $session->id) {
                 continue;
@@ -244,13 +256,27 @@ class PassengerBoardingEngine
      * (edgeWeights(), a direct 1-hop count) rather than the widest-path
      * score, which could reflect an indirect route entirely.
      *
+     * A passenger who has already taken config('passengers.max_hops') real
+     * flights on this itinerary never boards another connection, no matter
+     * how strong - only an exact-terminus match (rule 1) can still fire.
+     * Without this, max_hops only bounds each individual boarding decision's
+     * GRAPH search depth, not the passenger's cumulative real-world flight
+     * count - a passenger who keeps finding a real (but wrong-direction)
+     * connection at every stop could otherwise ride an unbounded number of
+     * actual flights, since no single decision plans further than one hop
+     * ahead. A passenger stuck here simply keeps waiting until either a
+     * direct flight to their destination appears or they expire (see
+     * ExpireStrandedPassengers) - the same fallback that already covers any
+     * other unreachable-destination case.
+     *
      * @param  array<int, array{session_id: int, arr: string}>  $candidates
      * @param  array<string, array<string, int>>  $graphExcludingOrigin  widestPathMatrixExcluding($passenger->current_icao) - shared across a whole boarding-lock batch, see handleBoardingLock.
      * @param  array<string, true>  $internationalIcaos
      * @param  \Illuminate\Support\Collection<string, int>  $airportTiers
+     * @param  \Illuminate\Support\Collection<string, int>  $legsTakenByPassenger  keyed by passenger_id - shared across a whole boarding-lock batch, see handleBoardingLock.
      * @return array{session_id: int, arr: string, is_terminus: bool}|null
      */
-    private function resolvePreferredCandidate(Passenger $passenger, array $candidates, array $graphExcludingOrigin, array $internationalIcaos, $airportTiers): ?array
+    private function resolvePreferredCandidate(Passenger $passenger, array $candidates, array $graphExcludingOrigin, array $internationalIcaos, $airportTiers, $legsTakenByPassenger): ?array
     {
         if ($candidates === []) {
             return null;
@@ -260,6 +286,10 @@ class PassengerBoardingEngine
             if ($candidate['arr'] === $passenger->destination_icao) {
                 return $candidate + ['is_terminus' => true];
             }
+        }
+
+        if (($legsTakenByPassenger[$passenger->id] ?? 0) >= config('passengers.max_hops')) {
+            return null;
         }
 
         $isTier1ToTier1 = ($airportTiers[$passenger->current_icao] ?? null) === 1
@@ -274,6 +304,12 @@ class PassengerBoardingEngine
             $candidates,
             fn (array $candidate) => ! isset($internationalIcaos[$candidate['arr']])
         ));
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        $candidates = $this->discardWeakConnections($passenger, $candidates);
 
         if ($candidates === []) {
             return null;
@@ -370,6 +406,37 @@ class PassengerBoardingEngine
             $candidateDistance = $this->distanceToDestinationNm($candidate['arr'], $passenger->destination_icao, $coords);
 
             return $candidateDistance === null || $candidateDistance < $currentDistance;
+        }));
+    }
+
+    /**
+     * Applied to every non-terminus candidate up front (see
+     * resolvePreferredCandidate) - every candidate reaching this point has
+     * already failed the exact-terminus check, so boarding it is inherently
+     * a connection relative to the passenger's real destination, not a
+     * genuine direct flight. The actual leg about to be boarded (current
+     * airport -> candidate's arrival) must itself carry at least
+     * config('passengers.min_connection_flights') flights over the trailing
+     * window, exactly like extendByOneHop enforces for every edge past a
+     * path's first hop in the abstract graph search (see
+     * TrafficGraphService) - a leg only ever observed a handful of times
+     * isn't a connection a passenger could actually expect to catch.
+     * Without this, scoring only ever looked at the candidate's onward
+     * prospects (graphExcludingOrigin), never the strength of the leg
+     * actually being boarded - e.g. a passenger sitting at YPAD could board
+     * a YPAD->YAYE flight purely because YAYE happens to score well toward
+     * the destination, even with zero YPAD->YAYE flights on record.
+     *
+     * @param  array<int, array{session_id: int, arr: string}>  $candidates
+     * @return array<int, array{session_id: int, arr: string}>
+     */
+    private function discardWeakConnections(Passenger $passenger, array $candidates): array
+    {
+        $edgeWeights = $this->trafficGraph->edgeWeights();
+        $minConnectionFlights = config('passengers.min_connection_flights');
+
+        return array_values(array_filter($candidates, function (array $candidate) use ($edgeWeights, $passenger, $minConnectionFlights) {
+            return ($edgeWeights[$passenger->current_icao][$candidate['arr']] ?? 0) >= $minConnectionFlights;
         }));
     }
 

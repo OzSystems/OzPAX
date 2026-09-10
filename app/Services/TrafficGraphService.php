@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\CalculateAirportTiers;
 use App\Models\Airport;
 use App\Models\InternationalDestination;
+use App\Support\GreatCircle;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -46,6 +47,13 @@ use Illuminate\Support\Facades\DB;
  * can make an implausible connection look "reachable", e.g. a passenger
  * routed via a remote Pacific strip purely because it happens to have
  * decent edges on both sides.
+ *
+ * No edge shorter than config('passengers.min_flight_distance_nm')
+ * (great-circle) is ever added to the graph at all (see computeEdgeWeights)
+ * - unlike the min_connection_flights rule below, this applies uniformly to
+ * every edge including a path's direct/first leg, since a short hop like
+ * YBCG->YBBN isn't a realistic passenger flight regardless of whether it's
+ * flown direct or used as a connection.
  *
  * An edge used to EXTEND a path past its first leg must itself carry at
  * least config('passengers.min_connection_flights') flights over the
@@ -273,11 +281,30 @@ class TrafficGraphService
 
         $internationalIcaos = InternationalDestination::pluck('icao')->flip()->all();
         $gatewayIcaos = Airport::where('is_international_gateway', true)->pluck('icao')->flip()->all();
+        $coords = Airport::select('icao', 'lat', 'lon')->get()->keyBy('icao');
+        $minFlightDistanceNm = config('passengers.min_flight_distance_nm');
 
         $weights = [];
 
         foreach ($rows as $row) {
             $cnt = (int) $row->cnt;
+
+            // A candidate whose coordinates aren't on record is kept rather
+            // than dropped, matching discardCandidatesFartherFromDestination
+            // elsewhere - "unknown" isn't evidence the leg is too short.
+            $depCoord = $coords->get($row->dep);
+            $arrCoord = $coords->get($row->arr);
+
+            if ($depCoord !== null && $arrCoord !== null) {
+                $distanceNm = GreatCircle::distanceNm(
+                    (float) $depCoord->lat, (float) $depCoord->lon,
+                    (float) $arrCoord->lat, (float) $arrCoord->lon
+                );
+
+                if ($distanceNm < $minFlightDistanceNm) {
+                    continue;
+                }
+            }
 
             // A leg touching a curated international destination only
             // enters the graph if its VATPAC side is a flagged
