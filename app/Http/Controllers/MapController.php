@@ -10,6 +10,7 @@ use App\Models\Flight;
 use App\Models\FlightSession;
 use App\Models\Passenger;
 use App\Services\FirBoundaries;
+use App\Services\VatSysPerformanceDataset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Carbon;
@@ -398,6 +399,74 @@ class MapController extends Controller
         RecalculateFlightReroutes::dispatchSync();
 
         return redirect()->route('past-flights.changes')->with('status', 'Reroutes recalculated against the current international destinations list.');
+    }
+
+    /**
+     * Monitoring page: every aircraft type seen in recorded flight history,
+     * most-flown first, plus the last vatSys Performance.xml coverage check
+     * (see VatSysPerformanceDataset).
+     */
+    public function aircraftTypes(VatSysPerformanceDataset $dataset)
+    {
+        $types = $this->aircraftTypeCounts();
+
+        return view('aircraft-types', [
+            'types' => $types,
+            'totalFlights' => $types->sum('flights'),
+            'maxFlights' => $types->max('flights'),
+            'lastCheck' => $dataset->lastCheck(),
+        ]);
+    }
+
+    /**
+     * Runs the Performance.xml coverage check on demand. A fetch or parse
+     * failure reports back on the page rather than 500ing - this reaches
+     * out to GitHub, so being unreachable is a normal outcome, not a bug.
+     */
+    public function checkAircraftTypes(VatSysPerformanceDataset $dataset): RedirectResponse
+    {
+        $counts = $this->aircraftTypeCounts()->pluck('flights', 'icao')->all();
+
+        try {
+            $result = $dataset->check($counts);
+        } catch (\Throwable $e) {
+            return redirect()->route('aircraft-types')
+                ->with('error', 'Could not check Performance.xml: '.$e->getMessage());
+        }
+
+        $missing = count($result['missing']);
+
+        return redirect()->route('aircraft-types')->with('status', $missing === 0
+            ? 'All '.$result['observed_types'].' recorded types are covered by Performance.xml.'
+            : $missing.' of '.$result['observed_types'].' recorded types are missing from Performance.xml.');
+    }
+
+    /**
+     * Flight history grouped by filed aircraft type, most-flown first, with
+     * equal counts falling back to alphabetical so the long tail of
+     * one-flight types holds a stable order between loads. Names come from
+     * our own aircraft_types rows where we have one - a filed type we've
+     * never seen before simply has no name to show (see
+     * RecordVatsimFlights::resolveAircraftType).
+     *
+     * @return \Illuminate\Support\Collection<int, array{icao: string, name: ?string, flights: int}>
+     */
+    private function aircraftTypeCounts()
+    {
+        $names = AircraftType::pluck('name', 'icao_type');
+
+        return Flight::select('aircraft_icao', DB::raw('count(*) as flights'))
+            ->whereNotNull('aircraft_icao')
+            ->where('aircraft_icao', '!=', '')
+            ->groupBy('aircraft_icao')
+            ->orderByDesc('flights')
+            ->orderBy('aircraft_icao')
+            ->get()
+            ->map(fn ($row) => [
+                'icao' => $row->aircraft_icao,
+                'name' => $names[$row->aircraft_icao] ?? null,
+                'flights' => (int) $row->flights,
+            ]);
     }
 
     /**
