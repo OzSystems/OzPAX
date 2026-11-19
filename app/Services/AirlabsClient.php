@@ -14,7 +14,9 @@ class AirlabsClient
 
     public function __construct()
     {
-        $this->logon = env('AIRLABS_API');
+        // Via config, not env() directly - env() returns null once
+        // `php artisan config:cache` has run, silently disabling Airlabs.
+        $this->logon = config('services.airlabs.key');
 
         $this->client = new Client([
             'base_uri' => 'https://airlabs.co/api/v9/',

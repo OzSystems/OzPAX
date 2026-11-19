@@ -50,7 +50,12 @@ class InternationalDestinationRouter
 
         $coords = $airportCoords[$icao] ?? null;
 
-        if ($coords === null || $this->destinations === []) {
+        // lat=0 AND lon=0 is the "unresolved coordinates" sentinel written
+        // by RecordVatsimFlights::resolveAirport when Airlabs has no data
+        // (ZZZZ, typos, ...). Treating it as a real position snapped every
+        // such airport to whichever hub is nearest the Gulf of Guinea
+        // (FAOR), recording e.g. YSSY->ZZZZ as YSSY->FAOR.
+        if ($coords === null || $this->destinations === [] || ((float) $coords['lat'] === 0.0 && (float) $coords['lon'] === 0.0)) {
             return $icao;
         }
 

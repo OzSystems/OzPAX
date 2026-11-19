@@ -155,15 +155,21 @@ class RecordVatsimFlights implements ShouldQueue
             // never witnessed the actual departure, so departed_at stays null
             // rather than being backfilled to "now".
             $session->status = $isAirborneNow ? 'airborne' : 'on_ground';
-            $session->connected_on_ground = ! $isAirborneNow
-                && $dep !== null
-                && isset($airportRecords[$dep])
-                && GreatCircle::distanceNm(
-                    (float) $pilot->latitude,
-                    (float) $pilot->longitude,
-                    $airportRecords[$dep]['lat'],
-                    $airportRecords[$dep]['lon']
-                ) <= self::AIRPORT_PROXIMITY_RADIUS_NM;
+            $session->connected_on_ground = ! $isAirborneNow && $this->isAtAirport($pilot, $dep, $airportRecords);
+        } elseif ($session->status === 'on_ground' && ! $session->connected_on_ground && ! $isAirborneNow && $session->boarding_locked_at === null) {
+            // A pilot flying several legs on one connection gets a fresh
+            // session after each landing (the landed one is deleted), first
+            // sighted at the field they just landed at while the OLD plan
+            // (dep = where they came from) is still filed - so
+            // connected_on_ground starts false. Once they refile with this
+            // field as the new departure, they are genuinely parked at
+            // their departure, so let them board passengers. Only ever
+            // upgraded false -> true, and only for a session we have
+            // physically seen on the ground (status on_ground can't be
+            // reached from a first-sighted-airborne session without
+            // landing), so this doesn't reopen boarding for flights picked
+            // up mid-air.
+            $session->connected_on_ground = $this->isAtAirport($pilot, $dep, $airportRecords);
         }
 
         $landed = false;
@@ -467,6 +473,13 @@ class RecordVatsimFlights implements ShouldQueue
         if ($dep !== null && $dep === $arr) {
             // Same-airport circuits (e.g. training touch-and-goes) aren't a
             // real route and would only pollute per-airport/route stats.
+            // This also covers a flight that diverted back to its own
+            // departure field - which CAN have a boarded manifest, so those
+            // passengers must be put back on the ground here (they're
+            // physically back at their origin) before the caller deletes
+            // the session, or they'd be stuck 'boarded' forever.
+            $boardingEngine->handleDisconnect($session);
+
             Log::info("RecordVatsimFlights: skipped {$session->callsign} - departure and arrival are the same airport ({$dep})");
 
             return;
@@ -517,6 +530,23 @@ class RecordVatsimFlights implements ShouldQueue
             $boardingEngine->handleDisconnect($session);
             $session->delete();
         }
+    }
+
+    /**
+     * @param  array<string, array{lat: float, lon: float, altitude: ?int, altitude_checked_at: ?Carbon}>  $airportRecords
+     */
+    private function isAtAirport(object $pilot, ?string $icao, array $airportRecords): bool
+    {
+        if ($icao === null || ! isset($airportRecords[$icao]) || ! isset($pilot->latitude, $pilot->longitude)) {
+            return false;
+        }
+
+        return GreatCircle::distanceNm(
+            (float) $pilot->latitude,
+            (float) $pilot->longitude,
+            $airportRecords[$icao]['lat'],
+            $airportRecords[$icao]['lon']
+        ) <= self::AIRPORT_PROXIMITY_RADIUS_NM;
     }
 
     private function normaliseIcao(?string $icao): ?string

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Passenger;
+use App\Services\PassengerBoardingEngine;
 use App\Services\PassengerNamePool;
 use App\Services\TrafficGraphService;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -47,9 +48,15 @@ class ExpireStrandedPassengers implements ShouldQueue
         return [(new WithoutOverlapping('expire-stranded-passengers'))->dontRelease()->expireAfter(60)];
     }
 
-    public function handle(PassengerNamePool $namePool, TrafficGraphService $graph): void
+    public function handle(PassengerNamePool $namePool, TrafficGraphService $graph, PassengerBoardingEngine $boardingEngine): void
     {
         $graph->refresh();
+
+        $recovered = $boardingEngine->recoverOrphanedBoarded();
+
+        if ($recovered > 0) {
+            Log::warning("ExpireStrandedPassengers: returned {$recovered} orphaned 'boarded' passengers (flight session gone) to their origin.");
+        }
 
         $now = Carbon::now();
         $timedOut = 0;

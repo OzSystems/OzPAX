@@ -79,6 +79,13 @@ class TrafficGraphService
     // between for the boarding engine's frequent per-departure lookups.
     private const CACHE_TTL_SECONDS = 1800;
 
+    // The all-pairs matrices (and especially the by-hop set, which holds
+    // max_hops cumulative copies) can exceed MySQL's max_allowed_packet
+    // (1M on a default XAMPP install) as a single database-cache row,
+    // which made refresh() throw and abort the whole expiry/generation
+    // job - same reason VatsimClient and FirBoundaries cache on disk.
+    private const CACHE_STORE = 'file';
+
     // ICAO PANS-ATM's standard placeholder for "aerodrome not listed" in a
     // flight plan (vatSys shows this when a pilot's filed airport isn't
     // recognised) - not a real airport, so a leg touching it is dropped
@@ -111,7 +118,7 @@ class TrafficGraphService
      */
     public function edgeWeights(): array
     {
-        return $this->edgeWeights ??= Cache::remember(
+        return $this->edgeWeights ??= Cache::store(self::CACHE_STORE)->remember(
             self::EDGE_CACHE_KEY,
             self::CACHE_TTL_SECONDS,
             fn () => $this->computeEdgeWeights()
@@ -123,7 +130,7 @@ class TrafficGraphService
      */
     public function widestPathMatrix(): array
     {
-        return $this->matrix ??= Cache::remember(
+        return $this->matrix ??= Cache::store(self::CACHE_STORE)->remember(
             self::MATRIX_CACHE_KEY,
             self::CACHE_TTL_SECONDS,
             fn () => $this->computeWidestPathMatrix($this->edgeWeights())
@@ -148,7 +155,7 @@ class TrafficGraphService
      */
     public function widestPathMatrixByHopCount(): array
     {
-        return $this->matrixByHop ??= Cache::remember(
+        return $this->matrixByHop ??= Cache::store(self::CACHE_STORE)->remember(
             self::HOP_MATRIX_CACHE_KEY,
             self::CACHE_TTL_SECONDS,
             fn () => $this->computeWidestPathMatrixByHopCount($this->edgeWeights())
@@ -226,10 +233,10 @@ class TrafficGraphService
         $this->matrix = $this->computeWidestPathMatrix($this->edgeWeights);
         $this->matrixByHop = $this->computeWidestPathMatrixByHopCount($this->edgeWeights);
 
-        Cache::put(self::EDGE_CACHE_KEY, $this->edgeWeights, self::CACHE_TTL_SECONDS);
-        Cache::put(self::HOP_ELIGIBLE_CACHE_KEY, $this->hopEligibleIcaos, self::CACHE_TTL_SECONDS);
-        Cache::put(self::MATRIX_CACHE_KEY, $this->matrix, self::CACHE_TTL_SECONDS);
-        Cache::put(self::HOP_MATRIX_CACHE_KEY, $this->matrixByHop, self::CACHE_TTL_SECONDS);
+        Cache::store(self::CACHE_STORE)->put(self::EDGE_CACHE_KEY, $this->edgeWeights, self::CACHE_TTL_SECONDS);
+        Cache::store(self::CACHE_STORE)->put(self::HOP_ELIGIBLE_CACHE_KEY, $this->hopEligibleIcaos, self::CACHE_TTL_SECONDS);
+        Cache::store(self::CACHE_STORE)->put(self::MATRIX_CACHE_KEY, $this->matrix, self::CACHE_TTL_SECONDS);
+        Cache::store(self::CACHE_STORE)->put(self::HOP_MATRIX_CACHE_KEY, $this->matrixByHop, self::CACHE_TTL_SECONDS);
     }
 
     /**
@@ -237,7 +244,7 @@ class TrafficGraphService
      */
     private function hopEligibleIcaos(): array
     {
-        return $this->hopEligibleIcaos ??= Cache::remember(
+        return $this->hopEligibleIcaos ??= Cache::store(self::CACHE_STORE)->remember(
             self::HOP_ELIGIBLE_CACHE_KEY,
             self::CACHE_TTL_SECONDS,
             fn () => $this->computeHopEligibleIcaos()
@@ -295,6 +302,14 @@ class TrafficGraphService
             $depCoord = $coords->get($row->dep);
             $arrCoord = $coords->get($row->arr);
 
+            // An airport stored with the lat=0/lon=0 "unresolved" sentinel
+            // (see RecordVatsimFlights::resolveAirport) is no more a real
+            // destination than ZZZZ is - drop it so passengers are never
+            // generated toward, or routed via, an airport nobody can locate.
+            if ($this->isUnresolved($depCoord) || $this->isUnresolved($arrCoord)) {
+                continue;
+            }
+
             if ($depCoord !== null && $arrCoord !== null) {
                 $distanceNm = GreatCircle::distanceNm(
                     (float) $depCoord->lat, (float) $depCoord->lon,
@@ -338,6 +353,11 @@ class TrafficGraphService
         }
 
         return $weights;
+    }
+
+    private function isUnresolved(?Airport $coord): bool
+    {
+        return $coord !== null && (float) $coord->lat === 0.0 && (float) $coord->lon === 0.0;
     }
 
     /**

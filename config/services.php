@@ -39,4 +39,8 @@ return [
         'token' => env('MAPBOX_TOKEN'),
     ],
 
+    'airlabs' => [
+        'key' => env('AIRLABS_API'),
+    ],
+
 ];

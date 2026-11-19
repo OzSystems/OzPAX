@@ -169,7 +169,17 @@ class PassengerBoardingEngine
             $pool[] = ['session_id' => $session->id, 'arr' => $reroutedArr];
         }
 
+        // Only siblings that could genuinely still take passengers count as
+        // alternatives: connected_on_ground (actually parked at their filed
+        // departure - excludes e.g. a pilot sitting at their ARRIVAL field
+        // after landing with the old plan still filed, whose dep still says
+        // this airport) and not yet locked (a locked manifest never
+        // re-evaluates, so it will never board anyone else). Without this,
+        // a passenger could "prefer" a sibling that can never carry them,
+        // skip this real flight, and then miss that one too.
         $siblings = FlightSession::where('status', 'on_ground')
+            ->where('connected_on_ground', true)
+            ->whereNull('boarding_locked_at')
             ->whereNotNull('dep')
             ->whereNotNull('arr')
             ->where('id', '!=', $session->id)
@@ -510,10 +520,16 @@ class PassengerBoardingEngine
 
         return $passengers
             ->map(function (Passenger $passenger) use ($now) {
-                $waitedSeconds = max(1, $now->diffInSeconds($passenger->last_movement_at));
-                $u = mt_rand(1, PHP_INT_MAX - 1) / PHP_INT_MAX;
+                // Carbon 3's diffIn*() is signed ($now->diffInSeconds($past)
+                // is negative), so the absolute flag is required - without
+                // it every passenger floored to a weight of 1 and selection
+                // was uniform rather than biased toward the longest-waiting.
+                $waitedSeconds = max(1, (int) $now->diffInSeconds($passenger->last_movement_at ?? $now, true));
+                $u = mt_rand(1, mt_getrandmax() - 1) / mt_getrandmax();
 
-                return ['passenger' => $passenger, 'key' => $u ** (1 / $waitedSeconds)];
+                // ln(u)/w orders identically to u^(1/w) but avoids every key
+                // collapsing toward 1.0 for week-long waits.
+                return ['passenger' => $passenger, 'key' => log($u) / $waitedSeconds];
             })
             ->sortByDesc('key')
             ->take($seatsAvailable)
@@ -628,5 +644,30 @@ class PassengerBoardingEngine
             'last_movement_at' => $now,
             'expires_at' => $now->copy()->addDays(config('passengers.expiry_days')),
         ]);
+    }
+
+    /**
+     * Safety net: any 'boarded' passenger whose flight session no longer
+     * exists can never be resolved by handleLegCompleted or handleDisconnect
+     * (both key on a live session id), and ExpireStrandedPassengers only
+     * looks at 'waiting' passengers - so without this they'd sit 'boarded'
+     * forever, counted against the global cap and their origin's headroom.
+     * Treated exactly like a disconnect: back to origin, waiting.
+     *
+     * @return int Passengers recovered.
+     */
+    public function recoverOrphanedBoarded(): int
+    {
+        $now = Carbon::now();
+
+        return Passenger::where('status', 'boarded')
+            ->whereDoesntHave('boardedSession')
+            ->update([
+                'status' => 'waiting',
+                'current_icao' => DB::raw('origin_icao'),
+                'boarded_flight_session_id' => null,
+                'last_movement_at' => $now,
+                'expires_at' => $now->copy()->addDays(config('passengers.expiry_days')),
+            ]);
     }
 }
